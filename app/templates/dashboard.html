@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+<p class="sub">Computed from the database. ARR = subscription ARR + maintenance ARR of the year (the maintenance year ending in that year). A converted customer's maintenance in a year it has subscription ARR is a prepaid leftover and is not ARR (shown separately, not in Total).</p>
+<div class="grid cols-4">
+  <div class="stat"><div class="n">{{ (arr_now / 1000000)|round(2) }}M</div><div class="l">ARR today ({{ today|fdate }}): subscription {{ (sub_now / 1000000)|round(2) }}M + maintenance {{ (maint_now / 1000000)|round(2) }}M{% if prepaid_now %} (excl. {{ (prepaid_now / 1000000)|round(2) }}M prepaid on converted customers){% endif %}</div></div>
+  <div class="stat"><div class="n">{{ (carr_now / 1000000)|round(2) }}M</div><div class="l">CARR (incl. signed, not started)</div></div>
+  <div class="stat"><div class="n">{{ counts.active }}</div><div class="l">Active subscriptions · {{ counts.maintenance }} customers paying maintenance</div></div>
+  <a class="stat" href="/?outcome=OPEN#due"><div class="n">{{ tally.DUE }}{% if tally.OVERDUE %} <span style="color:var(--err);font-size:16px">+ {{ tally.OVERDUE }} overdue</span>{% endif %}</div><div class="l">Renewals due in 120 days{% if tally.OVERDUE %} · overdue = ended without renewal{% endif %}</div></a>
+</div>
+
+<div class="grid cols-2" style="margin-top:16px">
+  <div class="panel">
+    <h2 style="margin-top:0">ARR by calendar year</h2>
+    <div class="table-wrap" style="max-height:none">
+    <table class="yeargrid">
+      <tr><th></th>{% for y in years %}<th class="{{ 'new' if y == today.year }}">{{ y }}</th>{% endfor %}</tr>
+      {% for name, row in arr.items() %}
+      {% if name == 'Converted maintenance' %}
+      <tr class="muted"><td title="Billed maintenance of converted customers in years they also have subscription ARR - not ARR, not in Total" style="white-space:nowrap">Prepaid (converted)</td>
+        {% for y in years %}<td class="num">{{ (row[y] / 1000000)|round(2) }}M</td>{% endfor %}</tr>
+      {% elif name == 'Signed, not started' %}
+      {% if row.values()|select|list %}<tr class="muted"><td title="Contracts signed but not started yet: CARR, not ARR - not in Total" style="white-space:nowrap">Signed, not started</td>
+        {% for y in years %}<td class="num">{{ (row[y] / 1000000)|round(2) }}M</td>{% endfor %}</tr>{% endif %}
+      {% elif name == 'CARR' %}
+      <tr><td title="Contracted ARR: Total + contracts signed but not started">CARR</td>
+        {% for y in years %}<td class="num">{{ (row[y] / 1000000)|round(2) }}M</td>{% endfor %}</tr>
+      {% else %}
+      <tr><td>{% if name in ('Total', 'Subscription') %}<b>{{ name }}</b>{% else %}{{ name }}{% endif %}</td>
+        {% for y in years %}<td class="num">{% if name == 'Total' %}<b>{{ (row[y] / 1000000)|round(2) }}M</b>{% else %}{{ (row[y] / 1000000)|round(2) }}M{% endif %}</td>{% endfor %}</tr>
+      {% endif %}
+      {% endfor %}
+    </table>
+    </div>
+  </div>
+  <div class="panel">
+    <h2 style="margin-top:0">Retention (customer cohort, subscription + maintenance)</h2>
+    <table>
+      <tr><th>Year</th><th class="num">Cohort</th><th class="num">Start ARR</th><th class="num">Churned</th><th class="num">GRR</th><th class="num">NRR</th></tr>
+      {% for r in retention %}
+      <tr><td>{{ r.year }}</td><td class="num">{{ r.cohort }}</td><td class="num">{{ r.start_arr|money }}</td>
+        <td class="num">{{ r.churned }} ({{ r.churned_arr|money }})</td>
+        <td class="num">{{ '%.1f%%'|format(r.grr * 100) if r.grr is not none else '' }}</td>
+        <td class="num">{{ '%.1f%%'|format(r.nrr * 100) if r.nrr is not none else '' }}</td></tr>
+      {% endfor %}
+    </table>
+    <h2>New customers (net new, by signing year)</h2>
+    <table class="yeargrid"><tr>{% for y in new_customers %}<th>{{ y }}</th>{% endfor %}</tr>
+      <tr>{% for y, n in new_customers.items() %}<td class="num">{{ n }}</td>{% endfor %}</tr></table>
+  </div>
+</div>
+
+<div class="panel" id="due">
+  <h2 style="margin-top:0">Renewals — terms ending from 12 months ago to 120 days ahead</h2>
+  <form class="filters" method="get" action="/#due">
+    <div><label>Platform</label><select name="platform" onchange="this.form.submit()">
+      <option value="">All</option>{% for p in Platform %}<option value="{{ p.value }}" {{ 'selected' if f.platform == p.value }}>{{ p.value }}</option>{% endfor %}</select></div>
+    <div><label>Status / outcome</label><select name="outcome" onchange="this.form.submit()">
+      <option value="">All ({{ tally.values()|sum }})</option>
+      <option value="OPEN" {{ 'selected' if f.outcome == 'OPEN' }}>Open: overdue + due ({{ tally.OVERDUE + tally.DUE }})</option>
+      {% for k, label in OUTCOMES.items() %}<option value="{{ k }}" {{ 'selected' if f.outcome == k }}>{{ label }} ({{ tally[k] }})</option>{% endfor %}</select></div>
+    <div><noscript><button class="btn primary">Filter</button></noscript>{% if f.platform or f.outcome %}<a class="btn" href="/#due">Reset</a>{% endif %}</div>
+  </form>
+  {% if work %}
+  <div class="table-wrap">
+  <table>
+    <tr><th class="num">Days away</th><th>Customer</th><th>Platform</th><th>Kind</th><th>Term</th><th>Renewal date</th><th class="num">ARR</th><th>Status / outcome</th><th>Note</th><th></th></tr>
+    {% for w in work %}
+    <tr>
+      <td class="num" style="font-weight:600;color:{{ 'var(--err)' if w.days < 30 and w.is_open else ('var(--ok)' if w.is_open else 'var(--muted)') }}">{{ w.days }} days</td>
+      <td><a href="/customer/{{ w.customer.qb_number }}">{{ w.customer.qb_number }}</a> {{ w.customer.name }}</td>
+      <td>{{ w.term.subscription.platform.value }}</td>
+      <td><span class="badge b-muted">{{ w.term.kind.value }}</span></td>
+      <td class="mono">{{ w.term.start_date|fdate }} – {{ w.term.end_date|fdate }}</td>
+      <td>{{ w.renewal_date|fdate }}</td>
+      <td class="num">{{ metrics.term_arr(w.term)|money }}</td>
+      <td>
+        {% if w.outcome == 'OVERDUE' %}<span class="badge b-error">Overdue</span>
+        {% elif w.outcome == 'DUE' %}<span class="badge b-warning">Due</span>
+        {% elif w.outcome == 'RENEWED' %}<span class="badge b-ok">Renewed</span>
+          {% for n in w.successors %}<a href="/term/{{ n.id }}">{{ n.start_date|fdate }} – {{ n.end_date|fdate }}</a>{% endfor %}
+          <span class="muted">· ARR {{ w.successor_arr|money }}</span>
+        {% elif w.outcome == 'NOT_RENEWING' %}<span class="badge b-error">Not renewing</span> <span class="muted">cancelled {{ w.cancelled_on|fdate }}</span>
+        {% else %}<span class="badge b-muted">Add-on ended</span>{% endif %}
+      </td>
+      <td>{{ w.term.renewal_note or '' }}</td>
+      <td class="actions">{% if w.is_open %}<a class="btn small" href="/wf/renew?term={{ w.term.id }}">Renew</a>
+        <a class="btn small" href="/wf/terminate?subscription={{ w.term.subscription_id }}">Terminate</a>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+  {% else %}<p class="muted">Nothing matches.</p>{% endif %}
+</div>
+{% endblock %}

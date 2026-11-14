@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Term {{ t.id }}{% endblock %}
+{% block content %}
+<h1>Term {{ t.id }} · <a href="/customer/{{ c.qb_number }}">{{ c.qb_number }}</a> {{ c.name }}</h1>
+<p class="sub">{{ t.subscription.platform.value }} · {{ t.kind.value }} · {{ t.start_date|fdate }} – {{ t.end_date|fdate }} · {{ metrics.term_status(t, today) }}{% if t.source_ref %} · imported from {{ t.source_ref }}{% endif %}</p>
+{% if msg %}<div class="alert ok">{{ msg }}</div>{% endif %}
+{% if error %}<div class="alert err">{{ error }}</div>{% endif %}
+
+<div class="grid cols-2">
+  <div class="panel">
+    <h2 style="margin-top:0">Value</h2>
+    <div class="kv">
+      <div>TCV</div><div>{{ t.tcv|money }}</div>
+      <div>Contractual term</div><div>{{ '%g'|format(t.term_months) }} months ({{ '%g'|format((t.term_months / 12)|round(2)) }} yrs)</div>
+      <div>ARR</div><div>{{ metrics.term_arr(t)|money }}{% if t.arr_override is not none %} <span class="badge b-warning">override</span> <span class="muted">{{ t.arr_override_reason }}</span>{% endif %}</div>
+      <div>Monthly revenue</div><div>{{ (metrics.term_arr(t) / 12)|money }}</div>
+      <div>Renewal date</div><div>{{ (t.end_date)|fdate }} + 1 day</div>
+      <div>Revenue by year (straight line)</div><div>{% for y, v in sched_by_year.items() %}{{ y }}: {{ v|money }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+      {% if t.notes %}<div>Notes</div><div>{{ t.notes }}</div>{% endif %}
+    </div>
+    <p class="muted" style="font-size:12px">Dates, TCV and term change through <a href="/wf/amend?term={{ t.id }}">Amend</a>, so history is kept.</p>
+  </div>
+
+  <form class="panel" method="post" action="/term/{{ t.id }}/edit">
+    <h2 style="margin-top:0">Details</h2>
+    <div class="fields">
+      <div class="field"><label>Signed date</label><input type="date" name="signed_date" value="{{ t.signed_date.isoformat() if t.signed_date else '' }}"></div>
+      <div class="field"><label>AE</label>{% with current=(t.ae.initials if t.ae else '') %}{% include "_ae_select.html" %}{% endwith %}</div>
+      <div class="field"><label>Reseller</label><input name="reseller" list="rs-list" value="{{ t.reseller.name if t.reseller else '' }}"></div>
+      <div class="field"><label>Payment terms</label><input name="payment_terms" value="{{ t.payment_terms or '' }}"></div>
+      <div class="field"><label>Go-live date</label><input type="date" name="golive_date" value="{{ t.golive_date.isoformat() if t.golive_date else '' }}"></div>
+      <div class="field"><label>Go-live note</label><input name="golive_note" value="{{ t.golive_note or '' }}"></div>
+      <div class="field"><label>Transactional volume</label><input name="transactional_volume" value="{{ t.transactional_volume or '' }}"></div>
+      <div class="field"><label>Renewal outlook</label><input name="renewal_note" list="rn-list" value="{{ t.renewal_note or '' }}"></div>
+      <div class="field"><label>Billing period (Y1/Y2…)</label><input name="billing_period" value="{{ t.billing_period or '' }}"></div>
+      <div class="field"><label>Recent invoice</label><input name="recent_invoice" value="{{ t.recent_invoice or '' }}"></div>
+      <div class="field wide"><label>Next action</label><input name="next_action" value="{{ t.next_action or '' }}" placeholder="To invoice Y3 - 8/1/2027"></div>
+      <div class="field wide"><label>Notes</label><input name="notes" value="{{ t.notes or '' }}"></div>
+    </div>
+    <p style="margin-bottom:0"><button class="btn primary">Save details</button></p>
+  </form>
+</div>
+
+<div class="grid cols-2">
+  <form class="panel" method="post" action="/term/{{ t.id }}/checks">
+    <h2 style="margin-top:0">Control checklist</h2>
+    <table>
+      <tr><th>Check</th><th>Owner</th><th>Result</th><th>Note</th><th>By</th></tr>
+      {% for ty in types %}{% set ch = checks.get(ty.code) %}
+      <tr><td title="{{ ty.label }}">{{ ty.label[:48] }}</td><td>{{ ty.owner or '' }}</td>
+        <td><select name="res_{{ ty.code }}" style="width:auto"><option value="">–</option>{% for r in CheckResult %}<option value="{{ r.value }}" {{ 'selected' if ch and ch.result == r }}>{{ r.value }}</option>{% endfor %}</select></td>
+        <td><input name="note_{{ ty.code }}" value="{{ ch.note if ch and ch.note else '' }}"></td>
+        <td class="muted" style="font-size:12px">{{ ch.checked_by if ch and ch.checked_by else '' }}</td></tr>
+      {% endfor %}
+    </table>
+    <p style="margin-bottom:0"><button class="btn primary">Save checklist</button></p>
+  </form>
+
+  <div class="panel">
+    <h2 style="margin-top:0">Invoices</h2>
+    <table>
+      <tr><th>Billing year</th><th>Date</th><th class="num">Amount</th><th>Reference</th><th></th></tr>
+      {% for i in t.invoices %}
+      <tr><td>{{ i.billing_year }}</td><td>{{ i.invoice_date|fdate }}</td><td class="num">{{ i.amount|money }}</td><td>{{ i.reference or '' }}</td>
+        <td><form method="post" action="/invoice/{{ i.id }}/delete?term_id={{ t.id }}" onsubmit="return confirm('Remove this invoice?')"><button class="btn small">Remove</button></form></td></tr>
+      {% endfor %}
+      <tr><td colspan="2" class="muted">Total invoiced</td><td class="num"><b>{{ (t.invoices|sum(attribute='amount'))|money }}</b></td><td colspan="2" class="muted">of TCV {{ t.tcv|money }}</td></tr>
+    </table>
+    <form method="post" action="/term/{{ t.id }}/invoice" class="fields" style="margin-top:12px">
+      <div class="field"><label>Billing year</label><input name="billing_year" required value="{{ today.year }}"></div>
+      <div class="field"><label>Invoice date</label><input type="date" name="invoice_date"></div>
+      <div class="field"><label>Amount</label><input name="amount" required inputmode="decimal" style="text-align:right"></div>
+      <div class="field"><label>Reference</label><input name="reference" placeholder="Invoice 24275"></div>
+      <div class="field"><button class="btn primary" style="margin-top:18px">Add invoice</button></div>
+    </form>
+  </div>
+</div>
+{% with docs=t.documents, upload_url='/term/' ~ t.id ~ '/documents', back='/term/' ~ t.id %}{% include "_documents.html" %}{% endwith %}
+<datalist id="rs-list"><option value="NTT"><option value="Mehrwerk"><option value="Netgo"></datalist>
+<datalist id="rn-list"><option value="For renewal"><option value="Not due for renewal"><option value="See {{ today.year + 1 }}"><option value="Invoiced but pending doc"></datalist>
+{% endblock %}

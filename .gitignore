@@ -1,0 +1,9 @@
+.env
+__pycache__/
+.pytest_cache/
+# accounting data never goes to git
+data/
+.env.*
+!.env.example
+*.pyc
+.claude/settings.local.json

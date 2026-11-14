@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}{{ c.qb_number }}{% endblock %}
+{% block content %}
+{% macro doc_cell(docs, post_url, view_url, anchor) %}
+  <div style="display:flex;gap:4px;align-items:center;white-space:nowrap">
+    {% if docs %}<a href="{{ view_url }}#documents" title="{{ docs|length }} SharePoint link(s) - open to view"><span class="badge b-ok">{{ docs|length }}</span></a>{% endif %}
+    <button type="button" class="btn small {{ '' if docs else 'primary' }}" title="Link the contract file on SharePoint"
+            onclick="linkDoc('{{ post_url }}', '{{ anchor }}')">Link</button>
+  </div>
+{%- endmacro %}
+<h1>{{ c.qb_number }} · {{ c.name }}</h1>
+<p class="sub">{% if c.maintenance_contracts %}<span class="badge b-info">maintenance</span> {% endif %}{% if c.has_perpetual_license %}<span class="badge b-info">perpetual licence holder</span> {% endif %}{{ c.subscriptions|length }} subscription(s){% if c.notes %} · <span class="mismatch">{{ c.notes }}</span>{% endif %}</p>
+{% if msg %}<div class="alert ok">{{ msg }}</div>{% endif %}
+{% if error %}<div class="alert err">{{ error }}</div>{% endif %}
+<div class="actions" style="margin-bottom:16px">
+  <a class="btn" href="/wf/new?customer={{ c.qb_number }}">New subscription</a>
+  <a class="btn" href="/wf/convert?customer={{ c.qb_number }}">Conversion</a>
+  {% if c.documents %}<a class="btn" href="/customer/{{ c.qb_number }}/contract-links.csv">Contract links (.csv, {{ c.documents|length }})</a>
+  {% else %}<span class="muted">No contracts yet - use <b>Link</b> in the Docs column of each term or maintenance line.</span>{% endif %}
+</div>
+
+{% for sub in c.subscriptions %}
+{% set st = metrics.subscription_status(sub, today) %}
+<div class="panel" id="sub-{{ sub.id }}">
+  <h2 style="margin-top:0">{{ sub.platform.value }} subscription #{{ sub.id }}
+    <span class="badge {{ {'ACTIVE':'b-ok','CHURNED':'b-error','ENDING':'b-warning'}.get(st, 'b-muted') }}">{{ st }}</span>
+    {% set overdue = metrics.renewal_overdue(sub, today) %}{% set last = metrics.latest_open_term(sub) %}
+    {% if overdue %}<span class="badge b-error">renewal overdue — ended {{ last.end_date|fdate }}</span>{% endif %}
+    <span class="badge b-muted">opened via {{ sub.opened_via.value }}</span>
+    {% if sub.license_category %}<span class="muted" style="font-weight:400">· {{ sub.license_category }}{% if sub.hybrid_class and sub.hybrid_class != 'n/a' %} ({{ sub.hybrid_class }}){% endif %}</span>{% endif %}</h2>
+  <table>
+    <tr><th>Term</th><th>Kind</th><th>Period</th><th class="num">TCV</th><th class="num">Months</th><th class="num">ARR</th><th>Status</th><th>Supersedes / superseded by</th><th>Sheet ref</th><th>Docs</th><th></th></tr>
+    {% for t in sub.terms %}
+    {% set ts = metrics.term_status(t, today) %}
+    <tr>
+      <td><a href="/term/{{ t.id }}">{{ t.id }}</a></td>
+      <td><span class="badge b-muted">{{ t.kind.value }}</span>{% if t.is_revised %} <span class="badge b-info">revised</span>{% endif %}</td>
+      <td class="mono">{{ t.start_date|fdate }} – {{ t.end_date|fdate }}</td>
+      <td class="num">{{ t.tcv|money }}</td>
+      <td class="num">{{ '%g'|format(t.term_months) }}</td>
+      <td class="num">{{ metrics.term_arr(t)|money }}{% if t.arr_override is not none %} <span class="badge b-warning" title="{{ t.arr_override_reason }}">override</span>{% endif %}</td>
+      <td><span class="badge {{ {'ACTIVE':'b-ok','CANCELLED':'b-error','SIGNED':'b-info'}.get(ts, 'b-muted') }}">{{ ts }}</span></td>
+      <td>{% for x in t.supersedes %}↳ {{ x.old_term_id }} {% endfor %}{% for x in t.superseded_by %}→ {{ x.new_term_id }} {% endfor %}</td>
+      <td class="muted">{{ t.source_ref or '' }}</td>
+      <td>{{ doc_cell(t.documents, '/term/' ~ t.id ~ '/documents', '/term/' ~ t.id, 'sub-' ~ sub.id) }}</td>
+      <td class="actions">
+        {% set whole_cancel = metrics.cancel_date(sub) %}
+        {% if not t.superseded_by and st in ('ACTIVE', 'ENDED') and not whole_cancel and not metrics.ended_early(t) %}
+        <a class="btn small {{ 'primary' if overdue and t is sameas last }}" href="/wf/renew?term={{ t.id }}">Renew</a>
+        {% endif %}
+        {% if not t.superseded_by and st == 'ACTIVE' and not metrics.cancels_term(t) %}
+        <a class="btn small" href="/wf/amend?term={{ t.id }}">Amend</a>
+        <a class="btn small" href="/wf/addon?term={{ t.id }}" title="Extra modules / plants / users added to this subscription's contract">Add-on</a>
+        <a class="btn small" href="/wf/terminate?subscription={{ sub.id }}&term={{ t.id }}" title="End only this contract; the rest of the subscription keeps running">Terminate</a>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% for x in sub.terminations %}
+  <p class="alert err" style="margin:10px 0 0">{% if x.scope %}Term{{ 's' if x.scope|length > 1 }} {% for y in x.scope %}{{ y.term_id }}{{ ', ' if not loop.last }}{% endfor %} terminated{% else %}Terminated{% endif %} {{ x.cancelled_on|fdate }} · {{ x.reason.value }}{% if x.note %} · {{ x.note }}{% endif %}{% if x.source_ref %} <span class="muted">({{ x.source_ref }})</span>{% endif %}</p>
+  {% endfor %}
+  {% if overdue %}
+  <p class="alert warn" style="margin:10px 0 0">The last term ended {{ last.end_date|fdate }} and there is no renewal or termination on file.
+    <a class="btn small primary" href="/wf/renew?term={{ last.id }}">Renew</a>
+    <a class="btn small danger" href="/wf/terminate?subscription={{ sub.id }}">Terminate (did not renew)</a></p>
+  {% elif st == 'ACTIVE' and not metrics.cancel_date(sub) %}<p style="margin-bottom:0"><a class="btn small danger" href="/wf/terminate?subscription={{ sub.id }}">Terminate this subscription</a></p>{% endif %}
+</div>
+{% endfor %}
+
+{% if c.maintenance_contracts %}
+<div class="panel" id="maintenance">
+  <h2 style="margin-top:0">Maintenance (perpetual licence){% if metrics.is_converted(c) %} <span class="badge b-info">converted - prepaid maintenance excluded from ARR once the subscription starts</span>{% endif %}
+    <a class="btn small" href="/maintenance/wf/new?customer={{ c.qb_number }}" style="float:right">New perpetual licence</a></h2>
+  <div class="table-wrap" style="max-height:none">
+  <table>
+    <tr><th>Line</th><th>Block</th><th>Anniversary</th>{% for y in years %}<th class="num">{{ y - 1 }}-{{ y }}</th>{% endfor %}<th>Docs</th><th></th></tr>
+    {% for mc in c.maintenance_contracts %}{% set fm = metrics.fee_map(mc) %}
+    <tr><td><a href="/maintenance/{{ mc.id }}">#{{ mc.id }}</a>{% if mc.parent_contract_id %} <span class="badge b-muted">add-on</span>{% endif %}</td>
+      <td><span class="badge b-muted">{{ mc.block.value }}</span>{% if mc.ended_on %} <span class="badge b-error">ended {{ mc.ended_on|fdate }}</span>{% endif %}</td>
+      <td>{{ MONTHS[mc.anniversary_month] if mc.anniversary_month else 'n/a' }}</td>
+      {% for y in years %}{% set f = fm.get(y) %}<td class="num {{ 'zero' if f is none }}">{% if f == 0 %}<span class="badge b-error">0</span>{% else %}{{ f|money if f is not none else '–' }}{% endif %}</td>{% endfor %}
+      <td>{{ doc_cell(mc.documents, '/maintenance/' ~ mc.id ~ '/documents', '/maintenance/' ~ mc.id, 'maintenance') }}</td>
+      <td class="actions">{% if not mc.ended_on %}<a class="btn small" href="/maintenance/wf/convert?contract={{ mc.id }}">Convert</a>{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% set unlinked = c.documents|selectattr('term_id', 'none')|selectattr('maintenance_contract_id', 'none')|list %}
+{% if unlinked %}
+<div class="panel">
+  <h2 style="margin-top:0">Unlinked contract documents <span class="badge b-warning">{{ unlinked|length }}</span></h2>
+  <p class="muted" style="margin-top:0">A re-import rebuilt the term or maintenance line these were attached to and could not find it again by its sheet ref. They are still in the contract links CSV.</p>
+  <table>{% for d in unlinked %}<tr><td><a href="/document/{{ d.id }}" target="_blank" rel="noopener">{{ d.filename }}</a></td><td class="muted">was on {{ d.link_source_ref or 'a term created in the app' }}</td><td>{{ d.uploaded_at.strftime('%m/%d/%Y') }} · {{ d.uploaded_by }}</td>
+    <td class="actions"><form method="post" action="/document/{{ d.id }}/delete?back=/customer/{{ c.qb_number }}" style="display:inline" data-name="{{ d.filename }}" onsubmit="return confirm('Remove ' + this.dataset.name + '?')"><button class="btn small">Remove</button></form></td></tr>{% endfor %}</table>
+</div>
+{% endif %}
+
+{% if c.subscriptions or c.maintenance_contracts %}
+<div class="panel">
+  <h2 style="margin-top:0">ARR by year (computed)</h2>
+  <div class="table-wrap" style="max-height:none">
+  <table class="yeargrid">
+    <tr><th>Term</th>{% for y in years %}<th>{{ y }}</th>{% endfor %}</tr>
+    {% for sub in c.subscriptions %}{% for t in sub.terms %}
+    {% if metrics.term_status(t, today) == 'SIGNED' %}
+    <tr class="muted"><td title="Signed but not started yet: counts as CARR, not ARR, until it starts">{{ sub.platform.value }} · {{ t.kind.value }} {{ t.id }} <span class="badge b-info">CARR - signed, starts {{ metrics.effective_from(t)|fdate }}</span></td>
+      {% for y in years %}{% set v = metrics.term_year_arr(t, y) %}<td class="num {{ 'zero' if not v }}"><i>{{ v|money if v else '–' }}</i></td>{% endfor %}</tr>
+    {% else %}
+    <tr><td>{{ sub.platform.value }} · {{ t.kind.value }} {{ t.id }}</td>
+      {% for y in years %}{% set v = metrics.term_year_arr(t, y, today) %}<td class="num {{ 'zero' if not v }}">{{ v|money if v else '–' }}</td>{% endfor %}</tr>
+    {% endif %}
+    {% endfor %}{% endfor %}
+    {% if c.maintenance_contracts %}<tr><td>Maintenance</td>{% for y in years %}{% set v = metrics.maintenance_year_arr(c, y) %}<td class="num {{ 'zero' if not v }}">{{ v|money if v else '–' }}</td>{% endfor %}</tr>{% endif %}
+    {% if metrics.is_converted(c) %}<tr class="muted"><td>of which prepaid (converted, not ARR)</td>{% for y in years %}{% set v = metrics.converted_maintenance(c, y, today) %}<td class="num {{ 'zero' if not v }}">{{ ('−' ~ (v|money)) if v else '–' }}</td>{% endfor %}</tr>{% endif %}
+    <tr><td><b>Customer ARR</b></td>{% for y in years %}{% set v = metrics.effective_year_arr(c, y, today) %}<td class="num"><b>{{ v|money if v else '–' }}</b></td>{% endfor %}</tr>
+    {% set ns = namespace(diff=false) %}{% for y in years %}{% if metrics.carr_year(c, y) != metrics.effective_year_arr(c, y, today) %}{% set ns.diff = true %}{% endif %}{% endfor %}
+    {% if ns.diff %}<tr><td title="Contracted ARR: ARR + contracts signed but not started">Customer CARR</td>{% for y in years %}{% set v = metrics.carr_year(c, y) %}<td class="num">{{ v|money if v else '–' }}</td>{% endfor %}</tr>{% endif %}
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% if fees %}
+<div class="panel"><h2 style="margin-top:0">Non-recurring fees (not ARR)</h2>
+  <table>{% for f in fees %}<tr><td>{{ f.platform.value }}</td><td>{{ f.description }}</td><td class="mono">{{ f.start_date|fdate }} – {{ f.end_date|fdate }}</td><td class="num">{{ f.amount|money }}</td><td class="muted">{{ f.source_ref }}</td></tr>{% endfor %}</table></div>
+{% endif %}
+
+{% if audit %}
+<div class="panel"><h2 style="margin-top:0">Recent changes</h2>
+  <table>{% for a in audit %}<tr class="{{ 'muted' if a.undone_at }}"><td style="white-space:nowrap">{{ a.at.strftime('%Y-%m-%d %H:%M') }}</td><td>{{ a.actor }}</td><td><span class="badge {{ 'b-warning' if a.action == 'undo' else 'b-muted' }}">{{ a.action }}</span></td>
+    <td>{% if a.undone_at %}<s>{{ a.summary }}</s> <span class="badge b-warning">undone</span>{% else %}{{ a.summary }}{% endif %}</td>
+    <td>{% if undoable(a) %}<a class="btn small" href="/audit/{{ a.id }}/undo?back=/customer/{{ c.qb_number }}">Undo</a>{% endif %}</td></tr>{% endfor %}</table></div>
+{% endif %}
+<script>
+function linkDoc(postUrl, anchor) {
+  const url = prompt("Paste the SharePoint link of the contract file:");
+  if (!url) return;
+  const name = prompt("Name to show (optional):", "") || "";
+  const f = document.createElement("form");
+  f.method = "post"; f.action = postUrl;
+  for (const [k, v] of Object.entries({url: url.trim(), name: name, back: "/customer/{{ c.qb_number }}", anchor: anchor})) {
+    const i = document.createElement("input"); i.type = "hidden"; i.name = k; i.value = v; f.appendChild(i);
+  }
+  document.body.appendChild(f); f.submit();
+}
+</script>
+{% endblock %}

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Database{% endblock %}
+{% block content %}
+<h1>Database</h1>
+<p class="sub">Read-only view of <span class="mono">{{ db_url.split('///')[-1] }}</span>. Change data through the app's workflows so the audit log stays complete.</p>
+<style>
+  .dbl { stroke: #9fb0d0; stroke-width: 1.5; }
+  .dbb rect { fill: var(--panel); stroke: var(--accent); stroke-width: 1.2; }
+  .dbb:hover rect { fill: var(--accent-soft); }
+  .dbt { font: 600 13px "Segoe UI", sans-serif; fill: var(--ink); }
+  .dbn { font: 11.5px "Segoe UI", sans-serif; fill: var(--muted); }
+</style>
+
+<div class="panel">
+  <h2 style="margin-top:0">How the tables connect</h2>
+  <p class="muted" style="margin-top:-4px">Each line is a foreign key (hover a line for the column). Click a table to open it.</p>
+  {{ svg|safe }}
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">Tables</h2>
+  <table>
+    <tr><th>Table</th><th class="num">Rows</th><th class="num">Columns</th><th>Purpose</th><th>Links to</th><th>Referenced by</th></tr>
+    {% for t in infos %}
+    <tr>
+      <td><a href="/db/{{ t.name }}"><b>{{ t.name }}</b></a></td>
+      <td class="num">{{ '{:,}'.format(t.count) }}</td>
+      <td class="num">{{ t.columns|length }}</td>
+      <td>{{ t.purpose }}</td>
+      <td>{% for c in t.columns if c.fk %}<a href="/db/{{ c.fk.split('.')[0] }}">{{ c.fk.split('.')[0] }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</td>
+      <td>{% for child, col in t.referenced_by %}<a href="/db/{{ child }}">{{ child }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

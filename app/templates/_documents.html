@@ -1,0 +1,27 @@
+{# Contract documents panel (SharePoint links). Needs: docs (list), upload_url (POST target), back (url to return to). #}
+<div class="panel" id="documents">
+  <h2 style="margin-top:0">Contract documents
+    {% if not docs %}<span class="badge b-warning">none linked</span>{% else %}<span class="badge b-ok">{{ docs|length }}</span>{% endif %}</h2>
+  {% if docs %}
+  <table>
+    <tr><th>Contract</th><th>Type</th><th>Linked</th><th>Note</th><th></th></tr>
+    {% for d in docs %}
+    <tr><td><a href="/document/{{ d.id }}" target="_blank" rel="noopener" title="{{ d.url }}">{{ d.filename }}</a></td>
+      <td><span class="badge b-muted">{{ DOC_TYPE_LABELS[d.doc_type.value] }}</span></td>
+      <td style="white-space:nowrap">{{ d.uploaded_at.strftime('%m/%d/%Y %H:%M') }} · {{ d.uploaded_by }}</td>
+      <td>{{ d.note or '' }}</td>
+      <td class="actions" style="white-space:nowrap">
+        <a class="btn small" href="/document/{{ d.id }}" target="_blank" rel="noopener">Open in SharePoint</a>
+        <form method="post" action="/document/{{ d.id }}/delete?back={{ back|urlencode }}" style="display:inline"
+              data-name="{{ d.filename }}" onsubmit="return confirm('Remove the link ' + this.dataset.name + '? The SharePoint file is not touched.')"><button class="btn small">Remove</button></form></td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+  <form method="post" action="{{ upload_url }}" class="fields" style="margin-top:12px">
+    <div class="field wide"><label>Link a contract on SharePoint</label><input name="url" type="url" required pattern="https://.*sharepoint\.com/.*"></div>
+    <div class="field"><label>Name (optional)</label><input name="name"></div>
+    <div class="field"><label>Type</label><select name="doc_type">{% for k, v in DOC_TYPE_LABELS.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>
+    <div class="field"><label>Note</label><input name="note"></div>
+    <div class="field"><button class="btn primary" style="margin-top:18px">Add link</button></div>
+  </form>
+</div>

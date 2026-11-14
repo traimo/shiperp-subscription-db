@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Import{% endblock %}
+{% block content %}
+<h1>Import &amp; reconciliation</h1>
+<div class="alert {{ 'warn' if check_blocking else 'ok' }}">{{ check_msg }} <a href="/check">Open the spreadsheet check</a></div>
+<p class="sub">To pull the latest workbooks from SharePoint and re-import, use <b>Refresh data</b> in the header (<a href="/refresh/result">last refresh</a>).</p>
+{% if not d %}<p>No import has run yet. Run <span class="mono">python -m app.importer</span>.</p>
+{% else %}
+<p class="sub">Imported {{ d.started }} from <span class="mono">{{ d.source.split('\\')[-1] }}</span> (SHA-256 {{ d.source_sha256[:12] }}…).</p>
+<div class="grid cols-2">
+  <div class="panel"><h2 style="margin-top:0">Sheet rows</h2>
+    <table><tr><th>Tab</th>{% for s in 'ABCDE' %}<th class="num">{{ s }}</th>{% endfor %}</tr>
+    {% for tab, cnt in d.sheet_counts.items() %}<tr><td>{{ tab }}</td>{% for s in 'ABCDE' %}<td class="num">{{ cnt[s] }}</td>{% endfor %}</tr>{% endfor %}</table></div>
+  <div class="panel"><h2 style="margin-top:0">Database</h2>
+    <div class="kv">{% for k, v in d.db_counts.items() %}<div>{{ k.replace('_', ' ') }}</div><div>{{ v if v is not mapping else (v.items()|map('join', ': ')|join(' · ')) }}</div>{% endfor %}</div></div>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">Subscription ARR by year: sheet vs database</h2>
+  {% for p, ys in d.reconciliation_totals.items() %}
+  <table class="yeargrid" style="margin-bottom:10px"><tr><th>{{ p }}</th>{% for y in ys %}<th>{{ y }}</th>{% endfor %}</tr>
+    <tr><td>Sheet</td>{% for y, v in ys.items() %}<td class="num">{{ v[0]|money }}</td>{% endfor %}</tr>
+    <tr><td>Database</td>{% for y, v in ys.items() %}<td class="num">{{ v[1]|money }}</td>{% endfor %}</tr>
+    <tr><td>Diff</td>{% for y, v in ys.items() %}<td class="num {{ 'mismatch' if (v[1] - v[0])|abs > 1 }}">{{ (v[1] - v[0])|money }}</td>{% endfor %}</tr></table>
+  {% endfor %}
+</div>
+
+{% if d.maintenance_totals %}
+<div class="panel">
+  <h2 style="margin-top:0">Maintenance by year: workbook GRAND TOTAL vs database</h2>
+  <p class="muted" style="margin-top:-4px">{{ d.maintenance_source.replace('\\', '/').split('/')[-1] }} · maintenance year "2025-2026" counts as 2026</p>
+  <table class="yeargrid"><tr><th></th>{% for y in d.maintenance_totals %}<th>{{ y|int - 1 }}-{{ y }}</th>{% endfor %}</tr>
+    <tr><td>Workbook</td>{% for y, v in d.maintenance_totals.items() %}<td class="num">{{ v[0]|money }}</td>{% endfor %}</tr>
+    <tr><td>Database</td>{% for y, v in d.maintenance_totals.items() %}<td class="num">{{ v[1]|money }}</td>{% endfor %}</tr>
+    <tr><td>Diff</td>{% for y, v in d.maintenance_totals.items() %}<td class="num {{ 'mismatch' if (v[1] - v[0])|abs > 1 }}">{{ (v[1] - v[0])|money }}</td>{% endfor %}</tr></table>
+  {% if d.maintenance_revenue %}
+  <h2>Maintenance revenue (GL 4300) and 12/31 deferred (GL 2310): sheet vs computed</h2>
+  <p class="muted" style="margin-top:-4px">Computed = each contract year's fee ÷ 12 from its anniversary month. Known sheet differences: 2022 October-anniversary rows recognised only Oct–Dec on the sheet; the sheet's 12/31 deferred includes advance-billed invoices ("Adj Advance Billing"); 2027 on the sheet is only partly filled.</p>
+  <table class="yeargrid"><tr><th></th>{% for y in d.maintenance_revenue %}<th>{{ y }}</th>{% endfor %}</tr>
+    <tr><td>Revenue - sheet</td>{% for y, v in d.maintenance_revenue.items() %}<td class="num">{{ v[0]|money }}</td>{% endfor %}</tr>
+    <tr><td>Revenue - computed</td>{% for y, v in d.maintenance_revenue.items() %}<td class="num {{ 'mismatch' if v[0] and ((v[1] - v[0]) / v[0])|abs > 0.01 }}">{{ v[1]|money }}</td>{% endfor %}</tr>
+    <tr><td>Deferred - sheet</td>{% for y, v in d.maintenance_revenue.items() %}<td class="num">{{ v[2]|money }}</td>{% endfor %}</tr>
+    <tr><td>Deferred - computed</td>{% for y, v in d.maintenance_revenue.items() %}<td class="num {{ 'mismatch' if v[2] and ((v[3] - v[2]) / v[2])|abs > 0.01 }}">{{ v[3]|money }}</td>{% endfor %}</tr></table>
+  {% endif %}
+  {% if d.maintenance_invoices %}<p style="margin-bottom:0">Advance-billing invoices: <b>{{ d.maintenance_invoices.matched }}</b> imported, <b>{{ d.maintenance_invoices.unmatched }}</b> not matched to a maintenance customer (listed in the notes below).{% if d.maintenance_reloaded %} Maintenance reloaded {{ d.maintenance_reloaded }}.{% endif %}</p>{% endif %}
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2 style="margin-top:0">Differences per customer ({{ d.reconciliation|length }})
+    <span class="tabs-inline" style="font-weight:400;font-size:13px"><a href="/import?show=current" class="{{ 'new' if show == 'current' }}">past &amp; current years</a> <a href="/import?show=all" class="{{ 'new' if show == 'all' }}">include future years</a></span></h2>
+  <div class="table-wrap">
+  <table><tr><th>Platform</th><th>Customer</th><th>Year</th><th class="num">Sheet</th><th class="num">Database</th><th>Likely reason</th><th>Terms</th></tr>
+    {% for r in d.reconciliation %}<tr><td>{{ r.platform }}</td><td><a href="/customer/{{ r.customer }}">{{ r.customer }}</a> {{ r.name }}</td><td>{{ r.year }}</td><td class="num">{{ r.sheet|money }}</td><td class="num">{{ r.db|money }}</td><td>{{ r.why }}</td><td class="muted">{{ r.terms }}</td></tr>{% endfor %}</table>
+  </div>
+</div>
+
+{% if name_notes %}
+<div class="panel">
+  <h2 style="margin-top:0">Customer names: Masterlist differs from the contracts ({{ name_notes|length }})</h2>
+  <p class="muted" style="margin-top:-4px">The database uses the name on the customer's most recent contract. Please correct these Masterlist entries.</p>
+  <table><tr><th>Customer</th><th>Sheet ref</th><th>Detail</th></tr>
+    {% for n in name_notes %}<tr><td><a href="/customer/{{ n.customer }}">{{ n.customer }}</a></td><td>{{ n.ref }}</td><td>{{ n.message }}</td></tr>{% endfor %}</table>
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2 style="margin-top:0">Import notes ({{ d.notes|length }})</h2>
+  <div class="table-wrap"><table><tr><th>Type</th><th>Sheet ref</th><th>Customer</th><th>Message</th></tr>
+    {% for n in d.notes %}<tr><td><span class="badge {{ {'rejected':'b-error','warning':'b-warning','fix':'b-info'}.get(n.severity, 'b-muted') }}">{{ n.severity }}</span></td><td>{{ n.ref }}</td><td>{% if n.customer %}<a href="/customer/{{ n.customer }}">{{ n.customer }}</a>{% endif %}</td><td>{{ n.message }}</td></tr>{% endfor %}</table></div>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Spreadsheet check{% endblock %}
+{% block content %}
+{% set sev_badge = {'error': 'b-error', 'decision': 'b-info', 'warning': 'b-warning', 'info': 'b-muted'} %}
+<h1>Spreadsheet check</h1>
+<p class="sub">Finds mistakes in the two source workbooks before the final import: every issue with its exact cell, what is there, what is expected and how to fix it. The workbooks and the database are only read. Fix the sheet (then run the check again), or <b>accept</b> an issue that is correct as it is, with a reason.</p>
+{% if msg %}<div class="alert ok">{{ msg }}</div>{% endif %}
+{% if error %}<div class="alert err">{{ error }}</div>{% endif %}
+
+<div class="actions" style="margin-bottom:16px">
+  <form method="post" action="/check/run" style="display:inline" onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Checking… (about 20 s)'"><button class="btn primary">Run check</button></form>
+  {% if res %}
+  <a class="btn" href="/check/issues.xlsx">Issue list (.xlsx)</a>
+  {% if res.sources.subscription %}<a class="btn" href="/check/annotated/subscription.xlsx" title="A copy of the workbook with every problem cell highlighted and a comment explaining it">Highlighted Subscription Summary</a>{% endif %}
+  {% if res.sources.maintenance %}<a class="btn" href="/check/annotated/maintenance.xlsx" title="A copy of the workbook with every problem cell highlighted and a comment explaining it">Highlighted Maintenance workbook</a>{% endif %}
+  {% endif %}
+</div>
+
+{% if not res %}
+<div class="panel"><p style="margin:0">The spreadsheets have not been checked yet. Click <b>Run check</b>.</p></div>
+{% else %}
+{% if changed %}<div class="alert warn">The {{ changed|join(' and ') }} workbook changed since this check ran ({{ res.ran_at.replace('T', ' ') }}) - click <b>Run check</b> again.</div>{% endif %}
+<p class="muted" style="margin-top:0">Checked {{ res.ran_at.replace('T', ' ') }}: {% for k, v in res.sources.items() if v %}<span class="mono">{{ v.name }}</span> (saved {{ v.modified.replace('T', ' ') }}){{ '; ' if not loop.last }}{% endfor %}</p>
+
+<div class="grid cols-4" style="margin-bottom:16px">
+  {% for s in SEVERITIES %}
+  <a class="stat" href="/check?severity={{ s }}&status=open" style="text-decoration:none;color:inherit" title="{{ SEVERITY_HELP[s] }}">
+    <div class="n">{{ counts[s].open }}</div>
+    <div class="l"><span class="badge {{ sev_badge[s] }}">{{ s }}</span> open{% if counts[s].accepted %} · {{ counts[s].accepted }} accepted{% endif %}<br>{{ SEVERITY_HELP[s] }}</div>
+  </a>
+  {% endfor %}
+</div>
+{% if counts.error.open == 0 and counts.decision.open == 0 %}<div class="alert ok">No open errors or decisions. Review the warnings, then the sheets are ready to import.</div>{% endif %}
+
+<div class="grid cols-2">
+  <div class="panel">
+    <h2 style="margin-top:0">Open issues by rule</h2>
+    <div class="table-wrap" style="max-height:320px"><table>
+      <tr><th>Rule</th><th>Problem</th><th></th><th class="num">Open</th></tr>
+      {% for (code, title, sev), n in by_rule %}<tr><td class="mono">{{ code }}</td><td><a href="/check?rule={{ code }}&status=open">{{ title }}</a></td><td><span class="badge {{ sev_badge[sev] }}">{{ sev }}</span></td><td class="num">{{ n }}</td></tr>{% endfor %}
+    </table></div>
+  </div>
+  <div class="panel">
+    <h2 style="margin-top:0">Filter</h2>
+    <form method="get" class="fields">
+      <div class="field"><label>Severity</label><select name="severity"><option value="">all</option>{% for s in SEVERITIES %}<option {{ 'selected' if f.severity == s }}>{{ s }}</option>{% endfor %}</select></div>
+      <div class="field"><label>Rule</label><select name="rule"><option value="">all</option>{% for (code, title, sev), n in by_rule %}<option value="{{ code }}" {{ 'selected' if f.rule == code }}>{{ code }} · {{ title }}</option>{% endfor %}</select></div>
+      <div class="field"><label>Tab</label><select name="tab"><option value="">all</option>{% for t in by_tab %}<option {{ 'selected' if f.tab == t }}>{{ t }}</option>{% endfor %}</select></div>
+      <div class="field"><label>Status</label><select name="status">{% for s, l in [('open', 'open (incl. re-opened)'), ('accepted', 'accepted'), ('all', 'all')] %}<option value="{{ s }}" {{ 'selected' if f.status == s }}>{{ l }}</option>{% endfor %}</select></div>
+      <div class="field"><label>Customer #</label><input name="customer" value="{{ f.customer }}" inputmode="numeric"></div>
+      <div class="field"><label>Search</label><input name="q" value="{{ f.q }}"></div>
+      <div class="field"><button class="btn primary" style="margin-top:18px">Filter</button> <a class="btn" href="/check" style="margin-top:18px">Clear</a></div>
+    </form>
+    <p class="muted" style="margin-bottom:0">The highlighted copies colour each open issue cell (red error, blue decision, amber warning, grey info) and add a comment; their first sheet lists the issues with links to the cells. They are review copies - make corrections in the original workbook.</p>
+  </div>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">{{ rows|length }} issue{{ '' if rows|length == 1 else 's' }}</h2>
+  <div class="table-wrap" style="max-height:none"><table>
+    <tr><th></th><th>Where</th><th>Customer</th><th>Problem</th><th>Current → expected</th><th>Status</th></tr>
+    {% for i in rows %}
+    <tr>
+      <td><span class="badge {{ sev_badge[i.severity] }}">{{ i.severity }}</span><br><span class="mono muted">{{ i.rule }}</span></td>
+      <td style="white-space:nowrap"><span class="mono">{{ i.cell or ('row ' ~ i.row if i.row else '') }}</span><br><span class="muted" style="font-size:12px">{{ i.tab }}{% if i.column %} · {{ i.column }}{% endif %}</span></td>
+      <td>{% if i.customer %}<a href="/customer/{{ i.customer }}">{{ i.customer }}</a>{% endif %}</td>
+      <td><b>{{ i.title }}</b><br>{{ i.message }}<br><span class="muted" style="font-size:12px">Fix: {{ i.fix }}</span></td>
+      <td>{% if i.current is not none %}<span class="mono">{{ i.current or '(blank)' }}</span>{% endif %}{% if i.expected %} → <span class="mono"><b>{{ i.expected }}</b></span>{% endif %}</td>
+      <td style="min-width:200px">
+        {% if i.status == 'accepted' %}<span class="badge b-ok">accepted</span> <span class="muted" style="font-size:12px">{{ i.accepted.reason }} · {{ i.accepted.by }} {{ i.accepted.at[:10] }}</span>
+          <form method="post" action="/check/reopen" style="margin-top:4px"><input type="hidden" name="id" value="{{ i.id }}"><input type="hidden" name="query" value="{{ query }}"><button class="btn small">Re-open</button></form>
+        {% else %}
+          {% if i.status == 'reopened' %}<span class="badge b-warning">re-opened</span> <span class="muted" style="font-size:12px">accepted earlier ({{ i.accepted.reason }}) - the value changed</span><br>{% endif %}
+          <form method="post" action="/check/accept" style="display:flex;gap:4px;margin-top:2px"><input type="hidden" name="id" value="{{ i.id }}"><input type="hidden" name="query" value="{{ query }}">
+            <input name="reason" required placeholder="Reason it is correct" style="min-width:0;flex:1"><button class="btn small">Accept</button></form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table></div>
+</div>
+{% endif %}
+{% endblock %}

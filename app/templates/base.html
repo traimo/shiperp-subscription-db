@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Subscriptions{% endblock %} · ShipERP Accounting</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="top">
+  <span class="brand">Subscription Database</span>
+  <nav>
+    {% set p = request.url.path %}
+    <a href="/" class="{{ 'active' if p == '/' }}">Dashboard</a>
+    <a href="/customers" class="{{ 'active' if p.startswith('/customer') }}">Customers</a>
+    <a href="/wf/new" class="{{ 'active' if p.startswith('/wf') }}">New subscription</a>
+    <a href="/maintenance" class="{{ 'active' if p.startswith('/maintenance') }}">Maintenance</a>
+    <a href="/check" class="{{ 'active' if p.startswith('/check') }}">Spreadsheet check</a>
+    <a href="/import" class="{{ 'active' if p.startswith('/import') }}">Import &amp; reconciliation</a>
+    <a href="/audit" class="{{ 'active' if p.startswith('/audit') }}">Audit log</a>
+    <a href="/db" class="{{ 'active' if p.startswith('/db') }}">Database</a>
+    <a href="/export/arr.csv">Export ARR (CSV)</a>
+  </nav>
+  <button type="button" class="btn primary refresh-btn" id="refresh-open" title="Pull the latest workbooks from SharePoint and re-import them">Refresh data</button>
+  <span class="file">POC 2 · SQLite</span>
+</header>
+<main>
+{% set _u = request.query_params.get('undo') %}{% if _u and _u.isdigit() %}<div class="alert ok" style="display:flex;gap:12px;align-items:center">Change saved. <a class="btn small" href="/audit/{{ _u }}/undo?back={{ request.url.path|urlencode }}">Undo this change</a></div>{% endif %}
+{% block content %}{% endblock %}
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

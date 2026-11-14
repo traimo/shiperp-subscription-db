@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<p class="muted" style="margin:0 0 4px"><a href="/maintenance">Maintenance</a> /</p>
+<h1>{{ title }}</h1>
+{% if mc %}<p class="sub"><a href="/maintenance/{{ mc.id }}">{{ mc.customer.qb_number }} {{ mc.customer.name }}</a> · {{ BLOCK_LABELS[mc.block.value] }} · contract year now {{ year_label(pr.current_key) }}: {{ pr.current_fee|money if pr.current_fee is not none else 'blank' }} · anniversary {{ MONTHS[mc.anniversary_month] if mc.anniversary_month else 'n/a' }}</p>
+{% else %}<p class="sub">You will see a summary before anything is saved.</p>{% endif %}
+{% if error %}<div class="alert err">{{ error }}</div>{% endif %}
+
+<form method="post" action="/maintenance/wf/{{ kind }}" id="mwf">
+{% if mc %}<input type="hidden" name="contract" value="{{ mc.id }}">{% endif %}
+
+{% if kind == 'new' %}
+<div class="panel">
+  <div class="fields">
+    <div class="field wide"><label>Customer</label><select name="customer" required>{% for cu in customers %}<option value="{{ cu.qb_number }}" {{ 'selected' if (c and c.qb_number == cu.qb_number) or form.customer == cu.qb_number|string }}>{{ cu.qb_number }} · {{ cu.name }}</option>{% endfor %}</select>
+      <span class="muted" style="font-size:12px">Not listed? <a href="/customers/new">Add the customer</a> first.</span></div>
+    <div class="field"><label>Product</label><select name="product">{% for pr in LicenseProduct %}<option value="{{ pr.value }}">{{ pr.value }}</option>{% endfor %}</select></div>
+    <div class="field"><label>Contract date</label><input type="date" name="contract_date" required value="{{ form.contract_date or today.isoformat() }}"></div>
+    <div class="field"><label>Licence list price</label><input name="list_price" class="mcalc" required value="{{ form.list_price or '' }}" style="text-align:right"></div>
+    <div class="field"><label>Discount</label><input name="discount" class="mcalc" value="{{ form.discount or '' }}" style="text-align:right" placeholder="0"></div>
+    <div class="field"><label>Maintenance %</label><input name="maintenance_pct" class="mcalc" required value="{{ form.maintenance_pct or '22' }}" style="text-align:right"></div>
+    <div class="field"><label>Billing anniversary</label><select name="anniversary_month"><option value="">= go-live month</option>{% for m in range(1, 13) %}<option value="{{ m }}">{{ MONTHS[m] }}</option>{% endfor %}</select></div>
+    <div class="field"><label><input type="checkbox" name="calendar_billing" style="width:auto"> Calendar billing (January)</label></div>
+    <div class="field"><label>Go-live date (blank = not live yet)</label><input type="date" name="golive_date" value="{{ form.golive_date or '' }}"></div>
+    <div class="field wide"><label>Notes</label><input name="notes" value="{{ form.notes or '' }}"></div>
+  </div>
+  <div class="derived" style="margin-top:12px"><b>Calculated</b> <span id="mcalc-out" class="muted"></span></div>
+</div>
+
+{% elif kind == 'live' %}
+<div class="panel"><div class="fields">
+  <div class="field"><label>Go-live date</label><input type="date" name="golive_date" required value="{{ form.golive_date or today.isoformat() }}"></div>
+</div><p class="muted" style="margin-bottom:0">Creates the first contract-year fee, prorated from the go-live month to the end of that contract year.</p></div>
+
+{% elif kind in ('purchase', 'decommission') %}
+<div class="panel"><div class="fields">
+  {% if kind == 'purchase' %}<div class="field"><label>Kind</label><select name="purchase_kind">{% for k in ['MODULE', 'PLANT', 'CARRIER'] %}<option value="{{ k }}" {{ 'selected' if form.purchase_kind == k }}>{{ k.title() }}</option>{% endfor %}</select></div>{% endif %}
+  <div class="field wide"><label>Description</label><input name="description" required value="{{ form.description or '' }}" placeholder="{{ 'EWM module / 2 plants Mexico / Penske' if kind == 'purchase' else 'Plants closed: ...' }}"></div>
+  <div class="field"><label>Quantity</label><input name="quantity" value="{{ form.quantity or '' }}"></div>
+  <div class="field"><label>Licence amount{{ ' removed' if kind == 'decommission' }}</label><input name="amount" value="{{ form.amount or '' }}" style="text-align:right"></div>
+  <div class="field"><label>Annual maintenance {{ 'removed' if kind == 'decommission' else 'added' }}</label><input name="maintenance_amount" required value="{{ form.maintenance_amount or '' }}" style="text-align:right"></div>
+  <div class="field"><label>Go-live</label><input type="date" name="golive_date" value="{{ form.golive_date or '' }}"></div>
+  <div class="field"><label>From contract year</label><select name="effective_year">{% for k in [pr.current_key, pr.current_key + 1, pr.current_key + 2] %}<option value="{{ k }}" {{ 'selected' if k == next_year }}>{{ year_label(k) }}</option>{% endfor %}</select></div>
+</div><p class="muted" style="margin-bottom:0">The maintenance amount is {{ 'subtracted from' if kind == 'decommission' else 'added to' }} the fee of that contract year and every later year already set; the annual roll applies it to years created later.</p></div>
+
+{% elif kind == 'convert' %}
+<div class="panel"><div class="fields">
+  <div class="field"><label>Subscription start / conversion date</label><input type="date" name="on" required value="{{ form.on or today.isoformat() }}"></div>
+  <div class="field wide"><label>Subscription it converted to</label><select name="subscription"><option value="">(none yet)</option>{% for sb in subs %}<option value="{{ sb.id }}" {{ 'selected' if loop.last }}>#{{ sb.id }} {{ sb.platform.value }} · opened via {{ sb.opened_via.value }}</option>{% endfor %}</select>
+    {% if not subs %}<span class="muted" style="font-size:12px">Create it first with <a href="/wf/convert?customer={{ mc.customer.qb_number }}">Conversion</a>.</span>{% endif %}</div>
+</div><p class="muted" style="margin-bottom:0">The first contract year starting on/after the date gets an explicit 0, later years are removed, the line moves to the Converted block.</p></div>
+
+{% elif kind == 'terminate' %}
+<div class="panel"><div class="fields">
+  <div class="field"><label>Termination date</label><input type="date" name="on" required value="{{ form.on or today.isoformat() }}"></div>
+  <div class="field"><label>Reason</label><select name="reason">{% for r in MaintenanceEndReason if r.value != 'CONVERTED' %}<option value="{{ r.value }}">{{ r.value.title() }}</option>{% endfor %}</select></div>
+  <div class="field wide"><label>Note</label><input name="note" value="{{ form.note or '' }}" placeholder="Terminated per ..."></div>
+</div><p class="muted" style="margin-bottom:0">The first unbilled contract year gets an explicit 0, later years are removed, the line moves to Closed.</p></div>
+
+{% elif kind == 'roll' %}
+<div class="panel">
+  <div class="fields">
+    <div class="field"><label>Into contract year (end)</label><input name="year" value="{{ year }}" required></div>
+    <div class="field"><label>Uplift %</label><input name="rate" value="{{ rate }}" required></div>
+    <div class="field"><label>Anniversary month</label><select name="month"><option value="">All</option>{% for m in range(1, 13) %}<option value="{{ m }}" {{ 'selected' if month == m }}>{{ MONTHS[m] }}</option>{% endfor %}</select></div>
+    <div class="field"><a class="btn" style="margin-top:18px" href="#" onclick="const f=this.closest('form');location='/maintenance/wf/roll?year='+f.year.value+'&rate='+f.rate.value+(f.month.value?'&month='+f.month.value:'');return false;">Refresh list</a></div>
+  </div>
+  <p class="muted">Lines with a {{ year_label(year - 1) }} fee and no {{ year_label(year) }} fee yet, not ended: new fee = prior × (1 + uplift) + maintenance of purchases effective {{ year_label(year) }}. Untick to skip.</p>
+  {% if cands %}
+  <div class="table-wrap"><table>
+    <tr><th><input type="checkbox" checked style="width:auto" onclick="document.querySelectorAll('input[name=pick]').forEach(c=>c.checked=this.checked)"></th><th>Customer</th><th>Anniversary</th><th class="num">{{ year_label(year - 1) }}</th><th class="num">{{ year_label(year) }}</th></tr>
+    {% for m, prior, new in cands %}
+    <tr><td><input type="checkbox" name="pick" value="{{ m.id }}" checked style="width:auto"></td><td><a href="/maintenance/{{ m.id }}">{{ m.customer.qb_number }}</a> {{ m.customer.name }}</td>
+      <td>{{ MONTHS[m.anniversary_month] if m.anniversary_month else '–' }}</td><td class="num">{{ prior|money }}</td><td class="num">{{ new|money }}</td></tr>
+    {% endfor %}
+    <tr><td></td><td><b>{{ cands|length }} lines</b></td><td></td><td class="num"><b>{{ cands|sum(attribute=1)|money }}</b></td><td class="num"><b>{{ cands|sum(attribute=2)|money }}</b></td></tr>
+  </table></div>
+  {% else %}<p class="muted">Nothing to roll for these settings.</p>{% endif %}
+</div>
+{% endif %}
+
+<p class="actions" style="margin-top:16px"><button class="btn primary" {{ 'disabled' if kind == 'roll' and not cands }}>Review change</button>
+  <a class="btn" href="{{ '/maintenance/%d'|format(mc.id) if mc else '/maintenance' }}">Cancel</a></p>
+</form>
+
+{% if kind == 'new' %}
+<script>
+(function () {
+  const f = document.getElementById('mwf'), out = document.getElementById('mcalc-out');
+  const n = (x) => parseFloat(String(x || '').replace(/,/g, '')) || 0;
+  function calc() {
+    const net = n(f.list_price.value) - Math.abs(n(f.discount.value)), pct = n(f.maintenance_pct.value) / 100;
+    out.textContent = `net licence ${net.toLocaleString(undefined, {minimumFractionDigits: 2})} × ${(pct * 100).toFixed(1)}% = ` +
+      `${(net * pct).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} annual maintenance`;
+  }
+  f.querySelectorAll('.mcalc').forEach((e) => e.addEventListener('input', calc)); calc();
+})();
+</script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,14 @@
+# Never send secrets or accounting data to a build (local or a remote builder)
+.env
+.env.*
+!.env.example
+data/
+# Not needed in the image
+.git/
+.claude/
+.pytest_cache/
+**/__pycache__/
+*.pyc
+tests/
+*.md
+!README.md

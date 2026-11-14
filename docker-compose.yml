@@ -1,0 +1,84 @@
+# Local Docker setup: the subscription database UI on PostgreSQL.
+#   docker compose up -d --build        -> http://localhost:8021  (the non-Docker app keeps port 8001)
+#
+# Values come from the project .env (gitignored):
+#   - `${NAME}` (no default) = secret; under DEPLOY-CONTRACT.md it would become Key Vault secret `name-with-dashes`.
+#   - `${NAME:-default}` = plain setting.
+# The shiperp-dashboard container reads the data as `dashboard_ro` at db:5432 by joining the `shiperp` network
+# (declare it there as `networks: {shiperp: {external: true}}`). From the host: 127.0.0.1:5433 (not "localhost": on Windows that tries IPv6 first and each connection stalls).
+#
+# Not deployable to Azure Container Apps as-is (DEPLOY-CONTRACT.md section 4): the `db` service and both named
+# volumes are local-only. For Azure, `db` becomes Azure Database for PostgreSQL (DATABASE_URL as a secret) and
+# data/ becomes an Azure Files share or is dropped.
+name: shiperp-subscription-db
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: services/app/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://subs:${POSTGRES_PASSWORD}@db:5432/subscriptions
+      APP_ALLOWED_HOSTS: ${APP_ALLOWED_HOSTS:-}
+      APP_USER: ${APP_USER:-}
+      SP_ALLOWED_HOSTS: ${SP_ALLOWED_HOSTS:-}
+      SP_TENANT_ID: ${SP_TENANT_ID}
+      SP_CLIENT_ID: ${SP_CLIENT_ID}
+      SP_CLIENT_SECRET: ${SP_CLIENT_SECRET}
+      SP_SUBSCRIPTION_URL: ${SP_SUBSCRIPTION_URL}
+      SP_MAINTENANCE_URL: ${SP_MAINTENANCE_URL}
+    ports:
+      - "127.0.0.1:8021:8001"
+    volumes:
+      - appdata:/app/data             # workbooks pulled by Refresh, backups, reports, spreadsheet-check results
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/healthz', timeout=4).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      db:
+        condition: service_healthy
+    deploy:
+      replicas: 1                     # Refresh rebuilds the tables in one process; keep a single writer
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 1G
+    networks: [shiperp]
+    restart: unless-stopped
+
+  db:
+    build:
+      context: .
+      dockerfile: services/db/Dockerfile
+    environment:
+      POSTGRES_DB: subscriptions
+      POSTGRES_USER: subs
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DASHBOARD_DB_PASSWORD: ${DASHBOARD_DB_PASSWORD}
+    ports:
+      - "127.0.0.1:5433:5432"         # host tools / seed script; 5432 is taken on this machine
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U subs -d subscriptions"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 1G
+    networks: [shiperp]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  appdata:
+
+networks:
+  shiperp:
+    name: shiperp

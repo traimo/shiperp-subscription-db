@@ -1,0 +1,40 @@
+<form method="post" action="/refresh">
+<h2>Refresh data from the workbooks</h2>
+<p class="sub" style="margin-bottom:10px">Pulls the latest workbooks from SharePoint (read-only), re-imports them and shows how the numbers changed. The database is backed up first.</p>
+
+{% if sp_error %}
+<div class="alert warn">{{ sp_error }}</div>
+<label class="choice"><input type="radio" name="source" value="local" checked> Use the files already in <span class="mono">data\source</span></label>
+{% else %}
+<input type="hidden" name="source" value="sharepoint">
+<table style="margin-bottom:10px">
+  <tr><th>Workbook on SharePoint</th><th>Last modified</th><th></th></tr>
+  {% for f in files %}<tr><td>{{ f.name }}</td>
+    <td style="white-space:nowrap">{{ f.modified.strftime('%m/%d/%Y %H:%M') if f.modified else '' }}{% if f.modified_by %} by {{ f.modified_by }}{% endif %}</td>
+    <td>{% if imported and f.modified %}{% if f.modified > imported %}<span class="badge b-warning">changed since last import</span>{% else %}<span class="badge b-muted">unchanged</span>{% endif %}{% endif %}</td></tr>{% endfor %}
+</table>
+{% endif %}
+<p class="muted" style="margin:4px 0 8px">Last import: {{ imported.strftime('%m/%d/%Y %H:%M') if imported else 'none' }}</p>
+<div class="alert {{ 'warn' if check_blocking else 'ok' }}" style="font-size:13px">{{ check_msg }}</div>
+
+{% if changes %}
+<h2>{{ changes|length }} change{{ 's' if changes|length != 1 }} made in the app since the last import</h2>
+<p class="muted" style="margin:0">The import rebuilds the database from the workbooks, so these changes are not in it afterwards.</p>
+<div class="changes"><table>
+  <tr><th>When</th><th>Who</th><th>Customer</th><th>Change</th><th></th></tr>
+  {% for a, kind in changes %}<tr><td style="white-space:nowrap">{{ a.at.strftime('%m/%d %H:%M') }}</td><td>{{ a.actor }}</td><td>{{ a.customer_qb or '' }}</td><td>{{ a.summary }}</td>
+    <td>{% if kind == 'can' %}<span class="badge b-ok">can reapply</span>{% elif kind == 'kept' %}<span class="badge b-muted">kept anyway</span>{% else %}<span class="badge b-warning">manual</span>{% endif %}</td></tr>{% endfor %}
+</table></div>
+<p style="margin:8px 0 2px;font-weight:600">Reapply these changes after the import?</p>
+<label class="choice"><input type="radio" name="reapply" value="no" checked> <b>Do not reapply</b> - show the workbooks exactly as they are. The changes are removed; a backup and the change list are kept in <span class="mono">data\backups</span>.</label>
+<label class="choice"><input type="radio" name="reapply" value="yes"> Reapply the {{ n_can }} change{{ 's' if n_can != 1 }} that can be reapplied (each gets an Undo); the rest are listed for you to redo by hand. Changes already in the workbook are skipped.</label>
+{% else %}
+<input type="hidden" name="reapply" value="no">
+<p class="muted">No changes were made in the app since the last import.</p>
+{% endif %}
+
+<div class="actions" style="margin-top:14px;justify-content:flex-end">
+  <button type="button" class="btn" data-close>Cancel</button>
+  <button type="submit" class="btn primary">Refresh</button>
+</div>
+</form>

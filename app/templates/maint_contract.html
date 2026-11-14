@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Maintenance {{ mc.customer.qb_number }}{% endblock %}
+{% block content %}
+<p class="muted" style="margin:0 0 4px"><a href="/maintenance">Maintenance</a> /</p>
+<h1><a href="/customer/{{ mc.customer.qb_number }}">{{ mc.customer.qb_number }}</a> · {{ mc.customer.name }}</h1>
+<p class="sub"><span class="badge b-muted">{{ BLOCK_LABELS[mc.block.value] }}</span>
+  <span class="badge {{ {'ACTIVE':'b-ok','STOPS_NEXT_YEAR':'b-warning','STOPPED':'b-error','ENDED':'b-error','NOT_LIVE':'b-info'}.get(pr.status, 'b-muted') }}">{{ pr.status }}</span>
+  {% if mc.converted %}<span class="badge b-info">converted</span>{% endif %}
+  {% if mc.parent %}<span class="badge b-muted">add-on of <a href="/maintenance/{{ mc.parent.id }}">#{{ mc.parent.id }}</a></span>{% endif %}
+  {% for a in mc.addons %}<span class="badge b-muted">add-on line <a href="/maintenance/{{ a.id }}">#{{ a.id }}</a></span>{% endfor %}
+  {% if mc.source_ref %}<span class="muted"> · {{ mc.source_ref }}</span>{% endif %}</p>
+{% if msg %}<div class="alert ok">{{ msg }}</div>{% endif %}
+{% if error %}<div class="alert err">{{ error }}</div>{% endif %}
+{% if validations %}<div class="alert warn"><b>Checks</b><ul>{% for v in validations %}<li>{{ v.message }}</li>{% endfor %}</ul></div>{% endif %}
+
+<div class="actions" style="margin-bottom:16px">
+  {% if not mc.ended_on %}
+  {% if not mc.go_live %}<a class="btn primary" href="/maintenance/wf/live?contract={{ mc.id }}">Mark live</a>{% endif %}
+  <a class="btn" href="/maintenance/wf/purchase?contract={{ mc.id }}">Additional purchase</a>
+  <a class="btn" href="/maintenance/wf/decommission?contract={{ mc.id }}">Decommission</a>
+  <a class="btn" href="/maintenance/wf/convert?contract={{ mc.id }}">Convert to subscription</a>
+  <a class="btn danger" href="/maintenance/wf/terminate?contract={{ mc.id }}">Terminate</a>
+  {% else %}<span class="alert err" style="margin:0">Ended {{ mc.ended_on|fdate }} · {{ mc.end_reason.value if mc.end_reason else '' }}{% if mc.end_note %} · {{ mc.end_note }}{% endif %}</span>{% endif %}
+</div>
+
+<div class="grid cols-2">
+  <div class="panel">
+    <h2 style="margin-top:0">Pricing</h2>
+    <div class="kv">
+      <div>Net licence</div><div>{{ pr.net_license|money }}</div>
+      <div>Additional purchases</div><div>{{ pr.additional_license|money }}</div>
+      <div>Total current licence</div><div><b>{{ pr.total_current_license|money }}</b>{% if pr.carrier_purchases %} <span class="muted">(+ carriers {{ pr.carrier_purchases|money }}, not in the base)</span>{% endif %}</div>
+      <div>Original maintenance</div><div>{{ pr.original_maintenance|money }}</div>
+      <div>Additional maintenance</div><div>{{ pr.additional_maintenance|money }}</div>
+      <div>Cumulative uplift</div><div>{{ pr.increase|money }}</div>
+      <div>Total maintenance (latest fee)</div><div><b>{{ pr.total_maintenance|money }}</b></div>
+      <div>Maintenance %</div><div>{{ '%.1f%%'|format(pr.maintenance_pct * 100) if pr.maintenance_pct else '–' }}</div>
+      <div>Contract year now</div><div>{{ year_label(pr.current_key) }} · fee {{ pr.current_fee|money if pr.current_fee is not none else 'blank' }} · monthly {{ ((pr.current_fee or 0) / 12)|money }}</div>
+    </div>
+  </div>
+
+  <form class="panel" method="post" action="/maintenance/{{ mc.id }}/details">
+    <h2 style="margin-top:0">Details</h2>
+    <div class="fields">
+      <div class="field"><label>Block</label><select name="block">{% for b in MaintenanceBlock %}<option value="{{ b.value }}" {{ 'selected' if mc.block == b }}>{{ BLOCK_LABELS[b.value] }}</option>{% endfor %}</select></div>
+      <div class="field"><label>Product</label><select name="product"><option value="">–</option>{% for pr in LicenseProduct %}<option value="{{ pr.value }}" {{ 'selected' if mc.product == pr }}>{{ pr.value }}</option>{% endfor %}</select></div>
+      <div class="field"><label>Billing anniversary</label><select name="anniversary_month"><option value="">not applicable</option>{% for m in range(1, 13) %}<option value="{{ m }}" {{ 'selected' if mc.anniversary_month == m }}>{{ MONTHS[m] }}</option>{% endfor %}</select></div>
+      <div class="field"><label><input type="checkbox" name="calendar_billing" style="width:auto" {{ 'checked' if mc.calendar_billing }}> Calendar billing</label></div>
+      <div class="field"><label>Contract</label><div>{{ mc.contract_date|fdate }}{% if mc.contract_year %} ({{ mc.contract_year }}){% endif %}</div></div>
+      <div class="field"><label>Go-live</label><div>{{ mc.golive_date|fdate if mc.golive_date else 'Not live' }}</div></div>
+      <div class="field wide"><label>Go-live note</label><input name="golive_note" value="{{ mc.golive_note or '' }}"></div>
+      <div class="field wide"><label>Notes</label><input name="notes" value="{{ mc.notes or '' }}"></div>
+    </div>
+    <p style="margin-bottom:0"><button class="btn primary">Save details</button></p>
+  </form>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">Fee per contract year</h2>
+  <p class="muted" style="margin-top:-4px">Leave the amount empty to blank a year (not billed); enter 0 to stop explicitly.</p>
+  <table>
+    <tr><th>Contract year</th><th>Covers</th><th class="num">Fee</th><th class="num">Change</th><th>Source</th><th class="num">Invoiced</th><th>Edit</th></tr>
+    {% for k in keys %}{% set f = (mc.fees|selectattr('year', 'equalto', k)|first) %}{% set prev = (mc.fees|selectattr('year', 'equalto', k - 1)|first) %}
+    <tr class="{{ 'new' if k == pr.current_key }}">
+      <td><b>{{ year_label(k) }}</b>{% if k == pr.current_key %} <span class="badge b-ok">now</span>{% endif %}</td>
+      <td class="muted">{{ MONTHS[mc.anniversary_month or 1][:3] }} {{ k - 1 }} – {{ MONTHS[((mc.anniversary_month or 1) - 2) % 12 + 1][:3] }} {{ k if (mc.anniversary_month or 1) > 1 else k - 1 }}</td>
+      <td class="num">{% if f is none or f is undefined %}<span class="zero">blank</span>{% elif f.amount == 0 %}<span class="badge b-error">0 stopped</span>{% else %}{{ f.amount|money }}{% if f.prorated %} <span class="badge b-info">prorated</span>{% endif %}{% endif %}</td>
+      <td class="num">{% if f and prev and prev.amount and f.amount %}{{ '%+.1f%%'|format((f.amount / prev.amount - 1) * 100) }}{% endif %}</td>
+      <td class="muted" style="font-size:12px">{% if f %}{{ f.source.value }}{% if f.note %} · {{ f.note }}{% endif %}{% endif %}</td>
+      <td class="num">{{ invoiced[k]|money if k in invoiced else '' }}</td>
+      <td><form method="post" action="/maintenance/{{ mc.id }}/fee" class="actions">
+        <input type="hidden" name="year" value="{{ k }}">
+        <input name="amount" value="{{ '%.2f'|format(f.amount) if f else '' }}" style="width:110px;text-align:right">
+        <input name="note" placeholder="reason" style="width:140px">
+        <button class="btn small">Save</button></form></td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="grid cols-2">
+  <div class="panel">
+    <h2 style="margin-top:0">Licence history</h2>
+    <table>
+      <tr><th>Kind</th><th>Description</th><th class="num">Qty</th><th class="num">Licence</th><th class="num">Maintenance / yr</th><th>Go-live</th><th>From</th></tr>
+      {% for pu in mc.purchases %}
+      <tr><td><span class="badge b-muted">{{ pu.kind.value }}</span></td><td>{{ pu.description or '' }}{% if pu.list_price %}<div class="muted" style="font-size:12px">list {{ pu.list_price|money }}{% if pu.discount %} · discount {{ pu.discount|money }}{% endif %}</div>{% endif %}</td>
+        <td class="num">{{ '%g'|format(pu.quantity) if pu.quantity else '' }}</td><td class="num">{{ pu.amount|money }}</td>
+        <td class="num">{{ pu.maintenance_amount|money if pu.maintenance_amount is not none else '' }}</td>
+        <td>{{ pu.golive_date|fdate if pu.golive_date else (pu.golive_note or '') }}</td><td>{{ year_label(pu.effective_year) if pu.effective_year else '' }}</td></tr>
+      {% else %}<tr><td colspan="7" class="muted">No licence history.</td></tr>{% endfor %}
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2 style="margin-top:0">Invoices (QuickBooks 1000-MT)</h2>
+    <table>
+      <tr><th>Year</th><th>Invoice</th><th>Date</th><th class="num">Amount</th><th>Memo</th><th></th></tr>
+      {% for i in mc.invoices %}
+      <tr><td>{{ year_label(i.contract_year) }}</td><td>{{ i.invoice_no or '' }}{% if i.reseller_invoice %} <span class="badge b-info">reseller</span>{% endif %}</td><td>{{ i.invoice_date|fdate }}</td>
+        <td class="num">{{ i.amount|money }}</td><td class="muted" style="font-size:12px">{{ (i.memo or '')[:50] }}</td>
+        <td><form method="post" action="/maintenance/invoice/{{ i.id }}/delete?contract_id={{ mc.id }}" onsubmit="return confirm('Remove this invoice?')"><button class="btn small">Remove</button></form></td></tr>
+      {% else %}<tr><td colspan="6" class="muted">No invoices recorded.</td></tr>{% endfor %}
+    </table>
+    <form method="post" action="/maintenance/{{ mc.id }}/invoice" class="fields" style="margin-top:12px">
+      <div class="field"><label>Contract year (end)</label><input name="year" value="{{ pr.current_key + 1 }}" required></div>
+      <div class="field"><label>Invoice no.</label><input name="invoice_no" required></div>
+      <div class="field"><label>Date</label><input type="date" name="invoice_date" required></div>
+      <div class="field"><label>Due</label><input type="date" name="due_date"></div>
+      <div class="field"><label>Amount</label><input name="amount" required style="text-align:right" value="{{ '%.2f'|format(pr.next_fee) if pr.next_fee else '' }}"></div>
+      <div class="field"><label><input type="checkbox" name="reseller" style="width:auto"> Reseller invoice</label></div>
+      <div class="field wide"><label>Memo</label><input name="memo"></div>
+      <div class="field"><button class="btn primary" style="margin-top:18px">Add invoice</button></div>
+    </form>
+  </div>
+</div>
+
+{% with docs=mc.documents, upload_url='/maintenance/' ~ mc.id ~ '/documents', back='/maintenance/' ~ mc.id %}{% include "_documents.html" %}{% endwith %}
+
+<div class="panel">
+  <h2 style="margin-top:0">Revenue schedule (GL 4300) and deferred (GL 2310)</h2>
+  <div class="table-wrap" style="max-height:none">
+  <table class="yeargrid">
+    <tr><th>Year</th>{% for m in range(1, 13) %}<th>{{ MONTHS[m][:3] }}</th>{% endfor %}<th>Revenue</th><th>Deferred 12/31</th></tr>
+    {% for y, row in schedule.items() %}
+    <tr><td>{{ y }}</td>{% for v in row.months %}<td class="num {{ 'zero' if not v }}">{{ '{:,.0f}'.format(v) if v else '–' }}</td>{% endfor %}
+      <td class="num"><b>{{ row.revenue|money }}</b></td><td class="num">{{ row.deferred|money }}</td></tr>
+    {% endfor %}
+  </table>
+  </div>
+</div>
+
+{% if audit %}
+<div class="panel"><h2 style="margin-top:0">Changes</h2>
+  <table>{% for a in audit %}<tr><td style="white-space:nowrap">{{ a.at.strftime('%Y-%m-%d %H:%M') }}</td><td>{{ a.actor }}</td><td><span class="badge b-muted">{{ a.action }}</span></td><td>{{ a.summary }}</td></tr>{% endfor %}</table></div>
+{% endif %}
+{% endblock %}

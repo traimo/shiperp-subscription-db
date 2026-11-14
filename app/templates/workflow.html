@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<h1>{{ title }}</h1>
+{% if base %}<p class="sub">From term {{ base.id }} ({{ base.kind.value }}, {{ base.start_date|fdate }} – {{ base.end_date|fdate }}, ARR {{ metrics.term_arr(base)|money }}) · {{ c.qb_number }} {{ c.name }}</p>
+{% elif sub %}<p class="sub">{{ sub.platform.value }} subscription #{{ sub.id }} · {{ c.qb_number }} {{ c.name }}</p>
+{% else %}<p class="sub">You will see a summary of the change before anything is saved.</p>{% endif %}
+{% if error %}<div class="alert err">{{ error }}</div>{% endif %}
+
+<form method="post" action="/wf/{{ kind }}" id="wf">
+  {% if base %}<input type="hidden" name="term" value="{{ base.id }}">{% endif %}
+  {% if sub %}<input type="hidden" name="subscription" value="{{ sub.id }}">{% endif %}
+
+{% if kind == 'terminate' %}
+  <div class="panel">
+    <div class="fields">
+      <div class="field"><label>Cancellation date</label><input type="date" name="cancelled_on" required value="{{ pre.cancelled_on }}"></div>
+      <div class="field"><label>Reason</label><select name="reason">{% for r in TerminationReason %}<option value="{{ r.value }}" {{ 'selected' if pre.reason == r.value }}>{{ r.value }}</option>{% endfor %}</select></div>
+      <div class="field wide"><label>Note</label><input name="note" value="{{ pre.note or '' }}"></div>
+    </div>
+    {% if contracts %}
+    <h2>Contracts to terminate</h2>
+    <input type="hidden" name="terms_listed" value="1">
+    <p class="muted" style="margin-top:0">All ticked = the whole subscription is cancelled. Untick the contracts that keep running to end only some of them (for example one add-on).</p>
+    <div style="overflow-x:auto"><table id="term-pick">
+      <tr><th></th><th>Term</th><th>Kind</th><th>Period</th><th class="num">ARR</th><th>Sheet ref</th></tr>
+      {% for x in contracts %}<tr><td><input type="checkbox" name="terms" id="tp-{{ x.id }}" value="{{ x.id }}" {{ 'checked' if x.id in pre.terms }} style="width:auto"></td>
+        <td><label for="tp-{{ x.id }}">{{ x.id }}</label></td><td>{{ x.kind.value }}</td><td class="mono">{{ x.start_date|fdate }} – {{ x.end_date|fdate }}</td>
+        <td class="num">{{ metrics.term_arr(x)|money }}</td><td class="muted">{{ x.source_ref or '' }}</td></tr>{% endfor %}
+    </table></div>
+    {% endif %}
+    <p class="muted" style="margin-bottom:0">ARR stops after the cancellation year for terms that started before the date. No negative mirror rows are needed.</p>
+  </div>
+{% else %}
+  {% if kind in ('new', 'convert') %}
+  <div class="panel">
+    <div class="fields">
+      <div class="field wide"><label>Customer</label>
+        <select name="customer" required>{% for cu in customers %}<option value="{{ cu.qb_number }}" {{ 'selected' if (c and c.qb_number == cu.qb_number) or (pre.customer|string == cu.qb_number|string) }}>{{ cu.qb_number }} · {{ cu.name }}</option>{% endfor %}</select>
+        <span class="muted" style="font-size:12px">Not listed? <a href="/customers/new">Add the customer</a> first.</span></div>
+      <div class="field"><label>Platform</label><select name="platform">{% for p in Platform %}<option value="{{ p.value }}" {{ 'selected' if pre.platform == p.value }}>{{ p.value }}</option>{% endfor %}</select></div>
+      {% if kind == 'new' %}
+      <div class="field"><label>License category</label><input name="license_category" list="lc-list" value="{{ pre.license_category or '' }}" placeholder="default from platform"></div>
+      <div class="field"><label>Hybrid class</label><select name="hybrid_class"><option value=""></option>{% for h in HYBRID_CLASSES %}<option value="{{ h }}" {{ 'selected' if pre.hybrid_class == h }}>{{ h }}</option>{% endfor %}{% if pre.hybrid_class and pre.hybrid_class not in HYBRID_CLASSES %}<option value="{{ pre.hybrid_class }}" selected>{{ pre.hybrid_class }}</option>{% endif %}</select></div>
+      {% endif %}
+    </div>
+    {% if kind == 'convert' %}
+    <p class="muted" style="margin:10px 0 0">A conversion <b>replaces</b> the perpetual licence with a subscription. Keeping the perpetual licence and adding a subscription (hybrid)? Use <a href="/wf/new{{ '?customer=%d'|format(c.qb_number) if c }}">New subscription</a> instead.</p>
+    {% if maint_lines %}
+    <h2>Maintenance (perpetual licence)</h2>
+    <p class="muted" style="margin-top:0">Ticked lines are converted too: maintenance is stopped (explicit 0) from the first contract year starting on or after the subscription start date. The current year stays billed.</p>
+    <table>{% for mc in maint_lines %}<tr><td style="width:24px"><input type="checkbox" name="stop_line" id="sl-{{ mc.id }}" value="{{ mc.id }}" checked style="width:auto"></td>
+      <td><label for="sl-{{ mc.id }}" style="display:inline;font-weight:400;color:inherit">Line #{{ mc.id }} · {{ mc.block.value }}{% if mc.source_ref %} · {{ mc.source_ref }}{% endif %}</label></td></tr>{% endfor %}</table>
+    {% elif c %}<p class="muted">{{ c.name }} has no open maintenance line.</p>{% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if kind == 'addon' %}
+  <div class="alert ok" style="color:var(--ink)"><b>Add-on</b> = extra modules, plants or users added to this <b>existing</b> subscription contract (sheet section C). It gets its own TCV and usually ends with the main contract (co-terminus). Use <b>New subscription</b> only for a separate contract on a platform the customer does not have yet, or after a cancellation.</div>
+  {% endif %}
+  <div class="panel">
+    <h2 style="margin-top:0">Term</h2>
+    <div class="fields">
+      <div class="field"><label>Signed date</label><input type="date" name="signed_date" value="{{ pre.signed_date or '' }}"></div>
+      <div class="field"><label>Start date</label><input type="date" name="start_date" class="drv" required value="{{ pre.start_date or '' }}"></div>
+      <div class="field"><label>End date</label><input type="date" name="end_date" class="drv" required value="{{ pre.end_date or '' }}"></div>
+      <div class="field"><label>TCV</label><input name="tcv" class="drv" required inputmode="decimal" value="{{ pre.tcv or '' }}" style="text-align:right"></div>
+      <div class="field"><label>Term in yrs (blank = from dates)</label><input name="term_years" class="drv" value="{{ pre.term_years or '' }}" placeholder="auto"></div>
+      <div class="field"><label>Payment terms</label><input name="payment_terms" value="{{ pre.payment_terms or '' }}"></div>
+      <div class="field"><label>AE</label>{% with current=pre.ae %}{% include "_ae_select.html" %}{% endwith %}</div>
+      <div class="field"><label>Reseller</label><input name="reseller" list="rs-list" value="{{ pre.reseller or '' }}"></div>
+      <div class="field"><label>Go-live date</label><input type="date" name="golive_date" value="{{ pre.golive_date or '' }}"></div>
+      <div class="field"><label>Transactional volume</label><input name="transactional_volume" value="{{ pre.transactional_volume or '' }}"></div>
+      <div class="field"><label>Renewal outlook</label><input name="renewal_note" value="{{ pre.renewal_note or '' }}"></div>
+      <div class="field wide"><label>Next action</label><input name="next_action" value="{{ pre.next_action or '' }}"></div>
+      {% if kind == 'addon' and base %}
+      <div class="field wide"><label><input type="checkbox" name="coterminus" value="{{ base.id }}" checked style="width:auto"> Co-terminus with term {{ base.id }} (ends {{ base.end_date|fdate }})</label></div>
+      {% endif %}
+    </div>
+    {% if rollups %}
+    {% set ns = namespace(arr=metrics.term_arr(base)) %}{% for r in rollups %}{% set ns.arr = ns.arr + metrics.term_arr(r) %}{% endfor %}
+    <p id="merge-summary" style="margin:12px 0 0"><b>Merging into this renewal:</b> <span id="merge-text">{% for r in rollups %}term {{ r.id }} ({{ r.kind.value }}, ARR {{ metrics.term_arr(r)|money }}){{ ', ' if not loop.last }}{% endfor %} · ARR being replaced {{ ns.arr|money }}</span>
+      <button type="button" class="btn small" id="merge-change">Change…</button></p>
+    <dialog id="merge-dlg" data-autoopen="{{ '0' if error else '1' }}">
+      <h2 style="margin-top:0">Merge contracts into this renewal?</h2>
+      <p style="margin-top:0">{{ c.name }} has {{ rollups|length }} other open contract{{ '' if rollups|length == 1 else 's' }} ending around the same time as term {{ base.id }}. <b>Ticked contracts will be replaced by this one renewal contract.</b> Untick a contract to keep it separate.</p>
+      <div style="overflow-x:auto"><table>
+        <tr><th></th><th>Term</th><th>Kind</th><th>Period</th><th class="num">ARR</th></tr>
+        <tr><td><input type="checkbox" checked disabled style="width:auto" title="The term being renewed"></td><td>{{ base.id }}</td><td>{{ base.kind.value }}</td><td class="mono">{{ base.start_date|fdate }} – {{ base.end_date|fdate }}</td><td class="num">{{ metrics.term_arr(base)|money }}</td></tr>
+        {% for r in rollups %}<tr><td><input type="checkbox" name="rollup" id="rollup-{{ r.id }}" value="{{ r.id }}" data-arr="{{ metrics.term_arr(r) }}" data-label="term {{ r.id }} ({{ r.kind.value }}, ARR {{ metrics.term_arr(r)|money }})" checked style="width:auto"></td>
+          <td><label for="rollup-{{ r.id }}">{{ r.id }}</label></td><td>{{ r.kind.value }}</td><td class="mono">{{ r.start_date|fdate }} – {{ r.end_date|fdate }}</td><td class="num">{{ metrics.term_arr(r)|money }}</td></tr>{% endfor %}
+      </table></div>
+      <p>ARR being replaced: <b id="merge-total">{{ ns.arr|money }}</b>. Enter the TCV of the combined contract on the form.</p>
+      <p class="actions" style="margin-bottom:0"><button type="button" class="btn primary" id="merge-ok">Continue</button>
+        <button type="button" class="btn" id="merge-none">Keep all separate</button>
+        <a class="btn" href="/customer/{{ c.qb_number }}">Cancel renewal</a></p>
+    </dialog>
+    {% endif %}
+  </div>
+  <div class="derived" id="derived"><b>Calculated</b>
+    <dl style="margin-top:8px">
+      <div><dt>Term in yrs</dt><dd id="d-term">–</dd></div>
+      <div><dt>ARR = TCV ÷ term</dt><dd id="d-arr">–</dd></div>
+      <div><dt>Monthly revenue</dt><dd id="d-monthly">–</dd></div>
+      <div><dt>Renewal date</dt><dd id="d-renewal">–</dd></div>
+      <div><dt>Calendar years with ARR</dt><dd id="d-years">–</dd></div>
+      {% if base and kind == 'amend' %}<div><dt>vs current ARR <span id="d-prior">{{ metrics.term_arr(base)|money }}</span></dt><dd id="d-change" data-base="{{ metrics.term_arr(base) }}" data-prior="{{ metrics.term_arr(base) }}">–</dd></div>{% endif %}
+      {% if base and kind == 'renew' %}<div><dt>vs prior ARR <span id="d-prior">{{ metrics.term_arr(base)|money }}</span></dt><dd id="d-change" data-base="{{ metrics.term_arr(base) }}" data-prior="{{ metrics.term_arr(base) }}">–</dd></div>{% endif %}
+    </dl>
+    <p class="muted" id="d-error" style="margin:6px 0 0"></p>
+    {% if base and kind == 'amend' %}<p style="margin:8px 0 0"><button type="button" class="btn small" id="keep-arr" data-arr="{{ metrics.term_arr(base) }}">Keep current ARR</button>
+      <span class="muted">sets TCV = current ARR {{ metrics.term_arr(base)|money }} × the new term in years (use it when only the dates change, e.g. to co-term).</span></p>{% endif %}
+  </div>
+{% endif %}
+  <p class="actions" style="margin-top:16px"><button class="btn primary">Review change</button> <a class="btn" href="{{ '/customer/%d'|format(c.qb_number) if c else '/' }}">Cancel</a></p>
+</form>
+<datalist id="rs-list"><option value="NTT"><option value="Mehrwerk"><option value="Netgo"></datalist>
+<datalist id="lc-list"><option value="On Premise"><option value="Cloud"><option value="Hybrid"></datalist>
+{% endblock %}

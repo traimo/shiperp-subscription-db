@@ -1,0 +1,35 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "db-ui",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "app.main:app",
+        "--port",
+        "8001"
+      ],
+      "port": 8001
+    },
+    {
+      "name": "db-ui-check",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-c",
+        "import os, uvicorn; os.environ['DATABASE_URL'] = 'sqlite:///data/check/subscriptions-check.db'; uvicorn.run('app.main:app', port=8011)"
+      ],
+      "port": 8011
+    },
+    {
+      "name": "db-ui-refresh-test",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-c",
+        "import os, pathlib, uvicorn; os.environ['DATABASE_URL'] = 'sqlite:///data/check/subscriptions-refresh.db'; from app import config, refresh; config.REPORT_DIR = pathlib.Path('data/check/reports').resolve(); refresh.PATHS = refresh.Paths(source=pathlib.Path('data/check/source').resolve(), backups=pathlib.Path('data/check/backups').resolve(), reports=config.REPORT_DIR); uvicorn.run('app.main:app', port=8012)"
+      ],
+      "port": 8012
+    }
+  ]
+}

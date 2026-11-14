@@ -1,0 +1,176 @@
+# Subscription database (POC 2)
+
+POC 2 replaces the "Subscription Summary" workbook with a normalised database. The workbook is used **once** — to
+load existing data — and the app then works only against the database. (POC 1, in the sibling project
+`shiperp-revenue-waterfall-ui`, keeps the workbook as the source of truth instead.)
+
+## Data model
+`customer` → `subscription` (one licence line per platform) → `term` (each contracted period: INITIAL, CONVERSION,
+ADD_ON, RENEWAL, AMENDMENT) · `term_supersession` (a renewal/amendment replacing one or more terms, e.g. base +
+add-ons) · `termination` (an event — no negative mirror rows) · `invoice` · `control_check_type` / `control_check`
+(the accounting checklist) · `non_recurring_fee` · `account_exec` · `reseller` · `audit_log` ·
+`maintenance_contract` / `maintenance_fee` (perpetual licences and their agreed annual maintenance fee).
+
+Nothing derived is stored: ARR (TCV ÷ term), ARR by calendar year, CARR, statuses, renewals due, retention and the
+monthly revenue schedule are computed in `app/metrics.py`. `term.arr_override` only keeps a legacy ARR the sheet used
+when it differs from TCV ÷ term (shown with an "override" badge).
+
+ARR-by-year follows the sheet's convention so totals reconcile: a term counts its full ARR in every calendar year it
+touches, except from the start year of a term that supersedes it and after its subscription's cancellation year.
+
+## Company ARR
+ARR(year) = subscription ARR + maintenance fees of the maintenance year **ending** in that year ("2025-2026" -> 2026),
+**except** a converted customer's maintenance in a year it also has subscription ARR: that is a prepaid leftover, not
+recurring revenue (confirmed 2026-11-13), so it is left out of every ARR figure (dashboard, CARR, customers list,
+customer page, ARR CSV, retention). It is still billed and shown separately ("Converted maint. (prepaid, not ARR)",
+`MAINTENANCE_PREPAID_CONVERTED` in the CSV). This **differs from the workbook spec 5.1**, which adds all maintenance
+(accounting's ~10.2M): 2026 excludes $274,558 from 13 converted customers. Maintenance billing, revenue, deferred and the
+GRAND TOTAL reconciliation are unchanged.
+For **future years** a signed conversion counts from signing (confirmed 2026-11-14, Belimo): the converted customer's
+maintenance of a year after the current one is not ARR as soon as the conversion is signed, even before the
+subscription starts; in the current year it stops counting once the subscription is in force.
+
+## Conversion, add-on, termination (workflows)
+- **Conversion** (customer page) replaces the perpetual licence: it creates the CONVERSION subscription and, for each
+  ticked maintenance line (ticked by default), stops maintenance (explicit 0) from the first contract year starting on
+  or after the subscription start - one change, one Undo. It has no Hybrid option: keeping the perpetual licence and
+  adding a subscription (hybrid) is a **New subscription**.
+- **Add-on** = extra modules / plants / users added to an existing subscription contract (sheet section C), usually
+  co-terminus with the main contract. **New subscription** = a separate contract on a platform the customer does not
+  have yet (or after a cancellation).
+- **Amend** shows the ARR change and offers **Keep current ARR** (TCV = current ARR x new term) for co-terming.
+- **Renew** merge popup: Continue, Keep all separate, or Cancel renewal.
+- **Terminate** lists the subscription's open contracts: all ticked cancels the subscription; unticking ends only the
+  ticked contracts (`termination_term`, migration 0010) - the others keep running and keep their ARR. Each contract row
+  also has a Terminate button for just that contract.
+
+## Run
+```powershell
+pip install -r requirements.txt
+python -m app.importer      # drop + migrate + load both workbooks in data\source; writes data\reports\
+.\run.ps1                   # http://127.0.0.1:8001
+python -m pytest -q
+```
+`DATABASE_URL` (in `.env`) switches to PostgreSQL / Azure SQL; the schema is managed with Alembic (`alembic/`).
+After pulling schema changes into an existing database, stop the app and run `python -m alembic upgrade head`.
+
+Money is `Decimal`: amounts are `NUMERIC(14,2)` (migration 0004), every assignment is rounded to the cent half-up
+(`app/money.py`), and derived figures (ARR, monthly revenue, deferred) are computed in Decimal and rounded only for
+display. SQLite stores NUMERIC as REAL and rounds back to 2 places on read; SQL Server / PostgreSQL store it exactly.
+
+Contract documents (SharePoint links only): every term and maintenance line has a "Contract documents" panel, and the
+customer page a **Link** button in its Docs column. Paste the file's SharePoint link (https://…sharepoint.com; direct
+path, library view `?id=` link or sharing link). The app stores only the link: it never connects to SharePoint, and the
+file opens with the viewer's own SharePoint access. Optional `SP_ALLOWED_HOSTS=yourcompany.sharepoint.com` in `.env`
+restricts links to the company's host. **Contract links (.csv)** on the customer page lists every link with its term /
+maintenance line, period, TCV, ARR and sheet ref. Re-imports keep the links (re-attached by customer number + sheet ref;
+unmatched ones stay on the customer as "unlinked").
+
+## Run in Docker (PostgreSQL)
+`docker-compose.yml` runs the app (`http://localhost:8021`) on PostgreSQL (`db`, host port `127.0.0.1:5433`).
+`.env` needs `POSTGRES_PASSWORD` and `DASHBOARD_DB_PASSWORD` (hex; see `.env.example`) besides the `SP_*` values.
+```powershell
+docker compose up -d --build                      # app runs `alembic upgrade head`, then serves; /healthz = probe
+python scripts/sqlite_to_postgres.py               # one-off: data\subscriptions.db -> Postgres (replaces all rows)
+docker compose cp "data/source/." app:/app/data/source/   # workbooks for Import / Refresh without SharePoint
+```
+- **Import the spreadsheets** into Postgres with the header's **Refresh data** (pulls from SharePoint, or uses the
+  files in the container's `data/source`), or `docker compose exec app python -m app.importer`. Backups are still
+  SQLite files (`data/backups` in the `appdata` volume), copied table by table from Postgres (`app/dbcopy.py`).
+- **shiperp-dashboard** reads as `dashboard_ro` (SELECT only; password `DASHBOARD_DB_PASSWORD`) at `db:5432`,
+  database `subscriptions`, after joining the external network `shiperp`. The role is created when the `pgdata`
+  volume is first initialised (`services/db/init/`); a re-import keeps its grant (default privileges).
+- From Windows, use `127.0.0.1`, not `localhost`, in Postgres URLs (localhost tries IPv6 first: ~2 s per connection).
+- Postgres tests: `$env:TEST_DATABASE_URL="postgresql+psycopg://subs:<pw>@127.0.0.1:5433/subs_test"` then
+  `python -m pytest -q tests/test_postgres.py` (a throwaway database: every test drops its tables).
+- The non-Docker app (`run.ps1`, port 8001) keeps using SQLite unless `.env` sets `DATABASE_URL`.
+
+## Maintenance (perpetual licences) — see MAINTENANCE-WORKBOOK.md
+Tables: `maintenance_contract` (one register line: block, product, anniversary month / calendar billing, go-live,
+converted / ended with date and reason, add-on lines linked to their parent), `license_purchase` (original licence,
+module / plant / carrier purchases, decommissions, with the maintenance each adds), `maintenance_fee` (fee per
+contract year, keyed by the year it ends: "2025-2026" = 2026; **no row = blank / not billed, 0 = explicitly stopped**),
+`maintenance_invoice` (QuickBooks 1000-MT invoices incl. advance billing). Computed, not stored: total current licence,
+original / additional maintenance, cumulative uplift, total maintenance, maintenance %, monthly revenue (steps at the
+anniversary), GL 4300 revenue per calendar year and 12/31 GL 2310 deferred.
+
+UI: **Maintenance** menu — totals by block and GRAND TOTAL per contract year, filters (block, anniversary month, missing
+next year, stops next year, not live, ended), checks (annual roll due, invoiced vs fee, value after a stop), contract
+page (pricing, fee per contract year with edit, licence history, invoices, revenue schedule), workflows with preview:
+new perpetual licence (first year prorated), mark live, annual roll (+4 % default, per anniversary month, untick lines),
+additional purchase, decommission, convert to subscription, terminate.
+
+Reload only maintenance from the workbook (keeps subscriptions and their app changes; refuses if maintenance was changed
+in the app): `python -m app.importer --maintenance-only`.
+
+## Safety on the local machine
+The app has no sign-in (it runs on the user's own machine), so it protects itself from other web pages open in the
+same browser: it answers only to `127.0.0.1` / `localhost` (add names with `APP_ALLOWED_HOSTS` in `.env`), form
+posts from another site are refused (Origin / Referer check), `back` links only go to pages of the app, and CSV exports
+prefix text cells starting with `= + - @` with an apostrophe so Excel does not run them as formulas.
+`python -m app.importer` backs the database up to `dataackups\` first and reads the workbook before anything is
+dropped (a locked or broken file leaves the database as it was).
+
+## Viewing the database
+- In the app: **Database** in the top menu (`/db`) — table list with row counts and purpose, a diagram of how the
+  tables connect, and per-table pages (structure, search, sort, paging, click foreign keys to follow them). Read-only.
+- Outside the app: open `data\subscriptions.db` with PyCharm's Database tool window (Data Source → SQLite) or DB Browser
+  for SQLite. Don't edit data there: it bypasses the audit log and the business rules.
+
+## Before go-live: spreadsheet check
+Goal: make both source workbooks 100 % accurate, then import. **Spreadsheet check** (menu) or
+`python -m app.checker [--export]` reads the workbooks in `data\source\` (read-only) and lists every issue with its
+exact cell, the current and expected value and how to fix it. Importer-based findings come from a trial import into a
+temp folder - the real database and import report are never touched.
+
+1. Run the check; work through **errors** (wrong data), **decisions** (open ARR rules: cancellations, renewal
+   transition years), then **warnings**; **info** is spelling / tidy-up.
+2. Fix the cell in the original workbook, save it in `data\source\`, run the check again. If a finding is correct as
+   it is, **Accept** it with a reason (`data\checks\accepted.json`; it re-opens if the cell value changes).
+3. Downloads: the issue list (.xlsx) and highlighted copies of each workbook (problem cells coloured with a comment,
+   first sheet "Check issues" links to every cell) - review copies only, saved in `data\checks\`.
+4. When nothing important is open, import (`python -m app.importer.cli`). The importer shows the check status and
+   asks to confirm while errors are open or a workbook changed since the check (`--yes` skips the question).
+
+## Refresh data (header button)
+Lets accounting see how their workbook edits change the app's numbers. **Refresh data** opens a popup showing the two
+workbooks on SharePoint (last modified, by whom, changed since the last import?), the spreadsheet check status and the
+changes made in the app since the last import, then:
+
+1. downloads both workbooks (read-only Microsoft Graph), checks they open, and swaps them into `data\source` (old
+   copies -> `dataackups\source-<stamp>\`); without SharePoint access the popup offers the files already there;
+2. backs up the database (`dataackups\subscriptions-before-refresh-<stamp>.db`) and saves the change list
+   (`audit-before-refresh-<stamp>.json`);
+3. re-imports (every table, including the audit log, is rebuilt from the workbooks; contract links are kept);
+4. **Reapply?** - default **Do not reapply**: the database then matches the workbooks exactly. "Reapply" replays the
+   changes through the normal operations (`app/reapply.py`), matching rows by customer number + sheet ref (or, for
+   terms created in the app, platform + kind + dates + TCV): new customer / subscription, add-on, renewal, amendment,
+   termination, term edit, maintenance conversion. Checklist ticks, invoices and other maintenance operations are
+   listed to redo by hand; changes already in the workbook are skipped. Each reapplied change has its own Undo.
+5. The result page (`/refresh/result`) shows ARR / CARR before -> after (dashboard figures), the import summary and
+   what was reapplied / skipped.
+
+Setup (`.env`): `SP_TENANT_ID`, `SP_CLIENT_ID`, `SP_CLIENT_SECRET` (Entra app with Sites.Selected **read** on the
+fi_team site) and the sharing links `SP_SUBSCRIPTION_URL`, `SP_MAINTENANCE_URL`. The app only reads the workbooks; it
+never writes to SharePoint, and contract documents stay links-only. SQLite only (the backup is a file copy).
+Test it on a copy: the `db-ui-refresh-test` launch entry runs on `data\check\subscriptions-refresh.db` with backups
+and reports in `data\check\`.
+
+## Import rules (see the Import page for every decision with its sheet reference)
+- A → NET_NEW subscription + INITIAL term; B → CONVERSION; C → ADD_ON; D → RENEWAL superseding the rows named in the
+  sheet's "previous ARR" formula (or, failing that, terms ending within 31 days before it starts).
+- E rows → terminations (cancel date: Date Cancelled, "Cancelled m/d/y", or the period end). E amounts are dropped.
+- Negative non-E rows (amendment reductions) are folded into the row with the same period.
+- "Not a subscription" → non-recurring fee. Duplicate rows and rows without any usable date are rejected.
+- Unparsable periods are estimated from the signed date and term; invalid days are clamped.
+
+## Reconciliation (as of 2026-11-12 import)
+Maintenance: every year 2016–2027 ties to the maintenance workbook's GRAND TOTAL to the cent.
+2020–2021 match exactly. The 22 differences in 2022–2026 are all classified: renewal transition years (sheet keeps
+the old ARR in the year a renewal starts), blank sheet cells on live terms, sheet values outside any term, and ARR the
+sheet still carries after a cancellation date (e.g. #80239 cancelled 11/30/2024) — **those need accounting's call**.
+Future-year (2027+) differences are mostly cells the sheet never filled.
+
+## Not covered yet
+Editing maintenance fees in the UI (read-only today), users/roles (actor = Windows user), deferred revenue / GL tie-out, attachments,
+Salesforce/QuickBooks integration, deployment.

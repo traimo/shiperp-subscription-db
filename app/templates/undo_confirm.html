@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Undo{% endblock %}
+{% block content %}
+<h1>Undo a change</h1>
+<p class="sub">{{ a.at.strftime('%m/%d/%Y %H:%M') }} · {{ a.actor }} · <span class="badge b-muted">{{ a.action }}</span> {{ a.entity }}{% if a.customer_qb %} · <a href="/customer/{{ a.customer_qb }}">{{ a.customer_qb }}</a>{% endif %}</p>
+<div class="panel">
+  <h2 style="margin-top:0">The change</h2>
+  <p style="margin-top:0">{{ a.summary }}</p>
+  {% if reason %}
+  <div class="alert err" style="margin-bottom:0">{{ reason }}</div>
+  {% else %}
+  <h2>Undoing it will</h2>
+  <ul>{% for st in steps %}<li>{{ st }}</li>{% endfor %}</ul>
+  <p class="muted" style="margin-bottom:0">The database goes back to how it was before this change. The undo is recorded in the audit log; to redo, make the change again.</p>
+  {% endif %}
+</div>
+<div class="actions">
+  {% if not reason %}
+  <form method="post" action="/audit/{{ a.id }}/undo" style="display:inline">
+    <input type="hidden" name="back" value="{{ back }}">
+    <button class="btn danger">Confirm undo</button>
+  </form>
+  {% endif %}
+  <a class="btn" href="{{ back }}">{{ 'Back' if reason else 'Cancel' }}</a>
+</div>
+{% endblock %}

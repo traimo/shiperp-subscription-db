@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Confirm{% endblock %}
+{% block content %}
+<h1>Review: {{ out.title }}</h1>
+<p class="sub">Nothing is saved yet. Confirm writes it in one database transaction and records it in the audit log.</p>
+{% if out.warnings %}<div class="alert warn"><b>Check before saving</b><ul>{% for w in out.warnings %}<li>{{ w }}</li>{% endfor %}</ul></div>{% endif %}
+<div class="panel">
+  <h2 style="margin-top:0">Changes</h2>
+  <div class="table-wrap" style="max-height:420px"><ul>{% for l in out.lines %}<li>{{ l }}</li>{% endfor %}</ul></div>
+  {% if out.arr_before %}
+  <h2>Maintenance fee by contract year</h2>
+  <table class="yeargrid">
+    <tr><th></th>{% for y in out.arr_before %}<th>{{ year_label(y) }}</th>{% endfor %}</tr>
+    <tr><td>Before</td>{% for y, v in out.arr_before.items() %}<td class="num">{{ v|money }}</td>{% endfor %}</tr>
+    <tr><td>After</td>{% for y, v in out.arr_after.items() %}<td class="num {{ 'new' if v != out.arr_before[y] }}">{{ v|money }}</td>{% endfor %}</tr>
+  </table>
+  {% endif %}
+</div>
+<div class="actions">
+  <form method="post" action="/maintenance/wf/{{ kind }}">
+    {% for k, v in fields %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <input type="hidden" name="_confirm" value="1">
+    <button class="btn primary">Confirm and save</button>
+  </form>
+  <a class="btn" href="javascript:history.back()">Back</a>
+</div>
+{% endblock %}

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}{{ info.name }}{% endblock %}
+{% block content %}
+<p class="muted" style="margin:0 0 4px"><a href="/db">Database</a> /</p>
+<h1>{{ info.name }}</h1>
+<p class="sub">{{ info.purpose }} · {{ '{:,}'.format(info.count) }} rows · read-only</p>
+
+<details class="panel">
+  <summary><b>Structure</b> — {{ info.columns|length }} columns{% if info.checks %}, {{ info.checks|length }} rules{% endif %}</summary>
+  <table style="margin-top:10px">
+    <tr><th>Column</th><th>Type</th><th>Required</th><th>Key</th><th>Allowed values</th></tr>
+    {% for c in info.columns %}
+    <tr><td class="mono">{{ c.name }}</td><td class="mono">{{ c.type }}</td><td>{{ '' if c.nullable else 'yes' }}</td>
+      <td>{% if c.pk %}<span class="badge b-info">primary key</span>{% endif %}{% if c.fk %}<span class="badge b-muted">→ <a href="/db/{{ c.fk.split('.')[0] }}">{{ c.fk }}</a></span>{% endif %}</td>
+      <td class="muted" style="font-size:12px">{{ c.enum_values|join(', ') }}</td></tr>
+    {% endfor %}
+  </table>
+  {% if info.checks or info.uniques %}
+  <p style="margin-bottom:0">{% for ch in info.checks %}<span class="badge b-warning mono">CHECK {{ ch }}</span> {% endfor %}
+    {% for u in info.uniques %}<span class="badge b-info mono">UNIQUE ({{ u }})</span> {% endfor %}</p>
+  {% endif %}
+  {% if info.referenced_by %}<p class="muted" style="margin-bottom:0">Referenced by: {% for child, col in info.referenced_by %}<span class="mono">{{ child }}.{{ col }}</span>{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+</details>
+
+<form class="filters" method="get">
+  <div style="min-width:260px"><label>Search (text columns, or an id/number)</label><input name="q" value="{{ f.q }}"></div>
+  {% if f.where %}<input type="hidden" name="where" value="{{ f.where }}">{% endif %}
+  {% if f.sort %}<input type="hidden" name="sort" value="{{ f.sort }}"><input type="hidden" name="desc" value="{{ f.desc }}">{% endif %}
+  <div><button class="btn primary">Search</button> <a class="btn" href="/db/{{ info.name }}">Reset</a></div>
+  {% if filters %}<div class="muted">Filtered: {% for k, v in filters.items() %}<span class="badge b-info mono">{{ k }} = {{ v }}</span> {% endfor %}</div>{% endif %}
+</form>
+
+{% macro url(page=None, sort=None, desc=None) -%}
+/db/{{ info.name }}?q={{ f.q|urlencode }}&where={{ f.where|urlencode }}&sort={{ sort if sort is not none else f.sort }}&desc={{ desc if desc is not none else f.desc }}&page={{ page or result.page }}
+{%- endmacro %}
+
+<p class="muted">{{ '{:,}'.format(result.total) }} matching rows · page {{ result.page }} of {{ result.pages }}
+  {% if result.page > 1 %}<a class="btn small" href="{{ url(page=result.page - 1) }}">‹ Prev</a>{% endif %}
+  {% if result.page < result.pages %}<a class="btn small" href="{{ url(page=result.page + 1) }}">Next ›</a>{% endif %}</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr>
+    {% for c in info.columns %}
+    <th><a href="{{ url(page=1, sort=c.name, desc=(0 if f.sort == c.name and f.desc else 1) if f.sort == c.name else 0) }}" style="color:inherit">{{ c.name }}{% if f.sort == c.name %} {{ '▼' if f.desc else '▲' }}{% endif %}</a></th>
+    {% endfor %}
+    {% if info.referenced_by %}<th>Related</th>{% endif %}
+  </tr></thead>
+  <tbody>
+  {% for r in result.rows %}
+  <tr>
+    {% for c in info.columns %}{% set v = r[c.name] %}
+    <td class="{{ 'num' if v is number and v is not boolean }}" style="white-space:nowrap">
+      {%- if v is none -%}<span class="zero">null</span>
+      {%- elif c.fk -%}<a href="/db/{{ c.fk.split('.')[0] }}?where={{ c.fk.split('.')[1] }}:{{ v }}">{{ v }}</a>
+      {%- elif v is boolean -%}{{ 'true' if v else 'false' }}
+      {%- elif v is number and v is not integer -%}{{ '{:,.2f}'.format(v) }}
+      {%- elif v.strftime is defined -%}{{ v|fdate }}
+      {%- else -%}{% set s = v|string %}<span title="{{ s }}">{{ s[:60] }}{{ '…' if s|length > 60 }}</span>{%- endif -%}
+    </td>
+    {% endfor %}
+    {% if info.referenced_by %}<td style="white-space:nowrap">{% for child, col in info.referenced_by %}<a class="btn small" href="/db/{{ child }}?where={{ col }}:{{ r['id'] if 'id' in r else r[info.columns[0].name] }}">{{ child }}</a> {% endfor %}</td>{% endif %}
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

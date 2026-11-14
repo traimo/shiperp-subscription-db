@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Audit log{% endblock %}
+{% block content %}
+<h1>Audit log</h1>
+<p class="sub">Every change made in the app. <b>Undo</b> puts the database back to how it was before that change (newest first when later changes touched the same records). Changes made before undo existed, and the workbook import, cannot be undone.</p>
+{% if msg %}<div class="alert ok">{{ msg }}</div>{% endif %}
+{% if error %}<div class="alert err">{{ error }}</div>{% endif %}
+<form class="filters" method="get"><div style="min-width:260px"><label>Search</label><input name="q" value="{{ q }}"></div><div><button class="btn primary">Search</button></div></form>
+{% if not rows %}<p class="muted">No changes recorded yet. (The initial import is documented on the Import page.)</p>{% endif %}
+<div class="table-wrap"><table>
+  <tr><th>When</th><th>Who</th><th>Action</th><th>Customer</th><th>Summary</th><th></th></tr>
+  {% for a in rows %}<tr class="{{ 'muted' if a.undone_at }}"><td style="white-space:nowrap">{{ a.at.strftime('%Y-%m-%d %H:%M:%S') }}</td><td>{{ a.actor }}</td><td><span class="badge {{ 'b-warning' if a.action == 'undo' else 'b-muted' }}">{{ a.action }}</span> {{ a.entity }} {{ a.entity_id or '' }}</td>
+    <td>{% if a.customer_qb %}<a href="/customer/{{ a.customer_qb }}">{{ a.customer_qb }}</a>{% endif %}</td>
+    <td>{% if a.undone_at %}<s>{{ a.summary }}</s> <span class="badge b-warning">undone {{ a.undone_at.strftime('%m/%d/%Y %H:%M') }} by {{ a.undone_by }}</span>{% else %}{{ a.summary }}{% endif %}</td>
+    <td>{% if undoable(a) %}<a class="btn small" href="/audit/{{ a.id }}/undo?back=/audit">Undo</a>{% endif %}</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Maintenance{% endblock %}
+{% block content %}
+<h1>Maintenance</h1>
+<p class="sub">Perpetual-licence maintenance register. Contract year <b>{{ year_label(year) }}</b> counts as {{ year }} in ARR. Blank = not billed yet · 0 = explicitly stopped.</p>
+{% if msg %}<div class="alert ok">{{ msg }}</div>{% endif %}
+<div class="actions" style="margin-bottom:16px">
+  <a class="btn primary" href="/maintenance/wf/roll?year={{ year + 1 }}">Annual roll into {{ year_label(year + 1) }}</a>
+  <a class="btn" href="/maintenance/wf/new">New perpetual licence</a>
+</div>
+
+<div class="grid cols-2">
+  <div class="panel">
+    <h2 style="margin-top:0">Totals by block
+      <span style="font-weight:400;font-size:13px">{% for y in years %}<a href="/maintenance?year={{ y }}" class="{{ 'new' if y == year }}" style="margin-left:8px">{{ year_label(y) }}</a>{% endfor %}</span></h2>
+    <table>
+      <tr><th>Block</th><th class="num">Lines</th><th class="num">{{ year_label(year - 1) }}</th><th class="num">{{ year_label(year) }}</th><th class="num">Change</th></tr>
+      {% for b, v in totals.items() %}{% if v[0] %}
+      <tr><td><a href="/maintenance?year={{ year }}&block={{ b }}">{{ BLOCK_LABELS[b] }}</a></td><td class="num">{{ v[0] }}</td>
+        <td class="num">{{ v[2]|money }}</td><td class="num">{{ v[1]|money }}</td>
+        <td class="num {{ 'mismatch' if v[1] < v[2] }}">{{ (v[1] - v[2])|money }}</td></tr>
+      {% endif %}{% endfor %}
+      <tr><td><b>GRAND TOTAL</b></td><td class="num"><b>{{ totals.values()|sum(attribute=0) }}</b></td><td class="num"><b>{{ grand[1]|money }}</b></td><td class="num"><b>{{ grand[0]|money }}</b></td><td class="num"><b>{{ (grand[0] - grand[1])|money }}</b></td></tr>
+    </table>
+    <p class="muted" style="font-size:12px;margin-bottom:0">A later year is lower until its anniversaries are billed (blank, not churn).</p>
+  </div>
+  <div class="panel">
+    <h2 style="margin-top:0">Checks ({{ checks|length }})</h2>
+    {% if checks %}
+    <div class="table-wrap" style="max-height:260px"><table>
+      {% for v in checks %}<tr><td><span class="badge b-warning">{{ v.check }}</span></td>
+        <td><a href="/maintenance/{{ v.contract.id }}">{{ v.contract.customer.qb_number }}</a> {{ v.contract.customer.name[:28] }}</td><td>{{ v.message }}</td></tr>{% endfor %}
+    </table></div>
+    {% else %}<p class="muted">No issues.</p>{% endif %}
+  </div>
+</div>
+
+<form class="filters" method="get">
+  <input type="hidden" name="year" value="{{ year }}">
+  <div><label>Block</label><select name="block"><option value="">All</option>{% for b in MaintenanceBlock %}<option value="{{ b.value }}" {{ 'selected' if f.block == b.value }}>{{ BLOCK_LABELS[b.value] }}</option>{% endfor %}</select></div>
+  <div><label>Anniversary</label><select name="month"><option value="">Any</option>{% for m in range(1, 13) %}<option value="{{ m }}" {{ 'selected' if f.month == m }}>{{ MONTHS[m] }}</option>{% endfor %}</select></div>
+  <div><label>Show</label><select name="flag">
+    {% for k, l in [('', 'All lines'), ('paying', 'Paying in ' ~ year_label(year)), ('missing_next', 'Missing ' ~ year_label(year + 1) ~ ' fee'), ('stops_next', 'Stops in ' ~ year_label(year + 1) ~ ' (explicit 0)'), ('not_live', 'Not live'), ('ended', 'Ended / converted')] %}
+    <option value="{{ k }}" {{ 'selected' if f.flag == k }}>{{ l }}</option>{% endfor %}</select></div>
+  <div style="min-width:220px"><label>Customer # or name</label><input name="q" value="{{ f.q }}"></div>
+  <div><button class="btn primary">Filter</button> <a class="btn" href="/maintenance?year={{ year }}">Reset</a></div>
+</form>
+
+<p class="muted">{{ rows|length }} lines</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Customer</th><th>Block</th><th>Anniversary</th><th class="num">Total current licence</th><th class="num">Maint. %</th>
+    <th class="num">{{ year_label(year - 1) }}</th><th class="num">{{ year_label(year) }}</th><th class="num">{{ year_label(year + 1) }}</th><th class="num">Change</th><th>Status</th></tr></thead>
+  <tbody>
+  {% for mc, p, fees in rows %}
+  {% set a, b, nx = fees.get(year - 1), fees.get(year), fees.get(year + 1) %}
+  <tr>
+    <td><a href="/maintenance/{{ mc.id }}">{{ mc.customer.qb_number }}</a> {{ mc.customer.name[:34] }}{% if mc.parent_contract_id %} <span class="badge b-muted">add-on</span>{% endif %}{% if mc.description %} <span class="muted">{{ mc.description[:30] }}</span>{% endif %}</td>
+    <td><span class="badge b-muted">{{ mc.block.value }}</span></td>
+    <td>{{ MONTHS[mc.anniversary_month] if mc.anniversary_month else '–' }}{% if mc.calendar_billing %} (calendar){% endif %}</td>
+    <td class="num">{{ p.total_current_license|money if p.total_current_license else '' }}</td>
+    <td class="num">{{ '%.1f%%'|format(p.maintenance_pct * 100) if p.maintenance_pct else '' }}</td>
+    <td class="num">{{ a|money if a is not none else '–' }}</td>
+    <td class="num">{% if b == 0 %}<span class="badge b-error">0</span>{% else %}{{ b|money if b is not none else '–' }}{% endif %}</td>
+    <td class="num">{% if nx == 0 %}<span class="badge b-error">0</span>{% else %}{{ nx|money if nx is not none else '–' }}{% endif %}</td>
+    <td class="num">{% if a and b %}{{ '%+.1f%%'|format((b / a - 1) * 100) }}{% endif %}</td>
+    <td><span class="badge {{ {'ACTIVE':'b-ok','STOPS_NEXT_YEAR':'b-warning','STOPPED':'b-error','ENDED':'b-error','NOT_LIVE':'b-info'}.get(p.status, 'b-muted') }}">{{ p.status }}</span></td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

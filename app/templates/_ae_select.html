@@ -1,0 +1,9 @@
+{# AE drop-down: existing account executives + "Other..." for new initials. Needs: current (initials or ''). #}
+{% set aes = ae_list() %}{% set cur = (current or '')|upper %}
+<select name="ae" onchange="var o=this.parentNode.querySelector('[name=ae_other]'); o.style.display = this.value === '__other__' ? '' : 'none'; if (this.value === '__other__') o.focus();">
+  <option value="">(none)</option>
+  {% for a in aes %}<option value="{{ a }}" {{ 'selected' if a == cur }}>{{ a }}</option>{% endfor %}
+  {% if cur and cur not in aes %}<option value="{{ cur }}" selected>{{ cur }}</option>{% endif %}
+  <option value="__other__">Other…</option>
+</select>
+<input name="ae_other" maxlength="8" placeholder="New AE initials" style="display:none;margin-top:4px">

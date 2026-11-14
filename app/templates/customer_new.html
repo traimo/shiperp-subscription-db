@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}New customer{% endblock %}
+{% block content %}
+<h1>New customer</h1>
+{% if error %}<div class="alert err">{{ error }}</div>{% endif %}
+<form class="panel" method="post" action="/customers/new" style="max-width:640px">
+  <div class="fields">
+    <div class="field"><label>QuickBooks customer number</label><input name="qb_number" required placeholder="80xxx" value="{{ form.qb_number or '' }}"></div>
+    <div class="field wide"><label>Customer name</label><input name="name" required value="{{ form.name or '' }}"></div>
+  </div>
+  <p style="margin-bottom:0"><button class="btn primary">Create</button></p>
+</form>
+{% endblock %}
