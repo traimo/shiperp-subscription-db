@@ -267,7 +267,13 @@ def customers_page(request: Request, q: str = "", status: str = "", platform: st
         return render(request, "customers.html", rows=rows, f=dict(q=q, status=status, platform=platform))
 
 
+def _clean_search(q: str) -> str:
+    """Search text without control characters (Excel cells refuse them), at most 100 characters."""
+    return re.sub(r"[\x00-\x1f\x7f]", "", q).strip()[:100]
+
+
 def _deferred_rows(s, q: str, platform: str, all: str):
+    q = _clean_search(q)
     months, rows, cur = deferred.deferred_table(metrics.load_customers_with_invoices(s), today(), platform)
     if q:
         rows = [r for r in rows if q.lower() in r.customer.name.lower() or q in str(r.customer.qb_number)]
@@ -282,6 +288,7 @@ def deferred_billing_xlsx(q: str = "", platform: str = "", all: str = ""):
     from . import deferred_export
     with SESSION_FACTORY() as s:
         months, rows, cur = _deferred_rows(s, q, platform, all)
+        q = _clean_search(q)
         filters = "; ".join(x for x in (f"search '{q}'" if q else "", f"platform {platform}" if platform else "",
                                         "" if all else "customers with a balance") if x)
         body = deferred_export.build(months, rows, deferred.column_totals(rows, len(months)),

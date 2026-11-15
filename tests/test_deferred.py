@@ -114,6 +114,18 @@ def test_columns_run_to_last_invoice_month_and_platform_filter():
     assert [r.customer.qb_number for r in rows] == [80002] and months[0] == d(2023, 6, 30)
 
 
+def test_only_future_terms_still_have_a_current_month():
+    """Review finding: with every term starting after today, today's month was missing (500 on the page)."""
+    c = customer(term("1200", d(2027, 3, 1)))
+    months, rows, cur = deferred.deferred_table([c], d(2026, 11, 12))
+    assert months == [d(2026, 11, 30)] and cur == 0              # columns end at today (no invoice later)
+    assert rows[0].balances == [None] and rows[0].current == 0
+    c = customer(term("1200", d(2027, 3, 1), [(2027, d(2027, 3, 15), "400")]))
+    months, rows, cur = deferred.deferred_table([c], d(2026, 11, 12))
+    assert months[0] == d(2026, 11, 30) and months[cur] == d(2026, 11, 30) and months[-1] == d(2027, 3, 31)
+    assert rows[0].balances[0] is None and rows[0].balances[-1] == Decimal("800.00")
+
+
 def test_terms_without_tcv_or_invoices_are_skipped():
     assert deferred.deferred_table([customer(term("0", d(2024, 1, 1)))], d(2026, 11, 12)) == ([], [], None)
 
@@ -224,3 +236,12 @@ def test_excel_download_route(imported):
     assert any(n and n.startswith("ALLISON TRANSMISSION") for n in names) and "Total" in names
     assert "search 'allison'" in ws["A2"].value
     assert "Invoiced" in page.text and ws["J5"].value == "Invoiced"
+    main.TODAY = TODAY
+    try:
+        bad = TestClient(main.app).get("/deferred-billing.xlsx?q=alli%00son%01")
+        future = TestClient(main.app).get("/deferred-billing?all=1&q=zz-no-such-customer")
+    finally:
+        main.TODAY = None
+    assert bad.status_code == 200 and future.status_code == 200          # control characters dropped, no 500
+    ws = openpyxl.load_workbook(io.BytesIO(bad.content))["Deferred Billing"]
+    assert "search 'allison'" in ws["A2"].value

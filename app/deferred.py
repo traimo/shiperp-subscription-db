@@ -111,7 +111,7 @@ def deferred_table(customers: list[Customer], today: dt.date, platform: str = ""
              for t in s.terms if _relevant(t)]
     if not terms:
         return [], [], None
-    first = min(counts_from(t) for _, t in terms)
+    first = min([today, *(counts_from(t) for _, t in terms)])       # today's month is always a column
     last = max([today, *(invoice_day(i) for _, t in terms for i in t.invoices)])
     months = month_ends(first, last)
     current_index = months.index(month_end(today))
