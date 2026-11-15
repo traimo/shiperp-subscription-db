@@ -9,8 +9,10 @@
   async function derive() {
     const body = { start_date: val("start_date"), end_date: val("end_date"), tcv: val("tcv"), term_years: val("term_years") };
     try {
-      const d = await (await fetch("/api/derive", { method: "POST", headers: { "Content-Type": "application/json" },
-                                                   body: JSON.stringify(body) })).json();
+      const r = await fetch("/api/derive", { method: "POST", headers: { "Content-Type": "application/json",
+                                             "X-Requested-With": "fetch" }, body: JSON.stringify(body) });
+      if (r.status === 401) { $("d-error").textContent = "Your sign-in expired - reload the page to sign in again."; return; }
+      const d = await r.json();
       $("d-error").textContent = d.ok ? "" : d.error;
       if (!d.ok) return;
       last = d;
@@ -82,11 +84,15 @@
     body.innerHTML = '<p class="muted">Checking SharePoint&hellip;</p>';
     dlg.showModal();
     try {
-      const r = await fetch("/refresh/dialog", { cache: "no-store" });
+      const r = await fetch("/refresh/dialog", { cache: "no-store", headers: { "X-Requested-With": "fetch" } });
+      if (r.status === 401) throw new Error("signin");
       if (!r.ok) throw new Error(r.status === 404 ? "restart" : String(r.status));
       body.innerHTML = await r.text();
     } catch (e) {
-      body.innerHTML = '<div class="alert err">' + (e.message === "restart"
+      body.innerHTML = '<div class="alert err">' + (e.message === "signin"
+        ? 'Your sign-in expired. <a href="/login?next=' + encodeURIComponent(location.pathname + location.search)
+          + '">Sign in again</a>.'
+        : e.message === "restart"
         ? "Refresh data is not available in the running server - restart the app (stop it and run .\\run.ps1 again)."
         : "Could not load the refresh options (" + e.message + ").") + '</div>' +
         '<div class="actions"><button type="button" class="btn" data-close>Close</button></div>';

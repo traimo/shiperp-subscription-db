@@ -9,4 +9,5 @@ openpyxl>=3.1      # importer only (reads the workbook)
 pytest>=8
 httpx>=0.27
 requests>=2.31   # Refresh data: read-only Microsoft Graph download of the workbooks
-msal>=1.28       # scripts/sharepoint_access.py only (interactive admin sign-in)
+msal>=1.28       # Microsoft sign-in (app/auth.py) and scripts/sharepoint_access.py
+itsdangerous>=2.1  # signed session cookie (Starlette SessionMiddleware)

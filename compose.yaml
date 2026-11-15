@@ -1,0 +1,52 @@
+# The subscription database UI, as deployed to Azure Container Apps by az-deploy-agent (which reads this file only).
+#
+#   - `${NAME}` (no default) = secret: Key Vault secret `name-with-dashes` in the app's own vault (set by Tony).
+#   - `${NAME:-default}` / literals = plain settings.
+#   - No `db` service and no volumes here (the deployer rejects volumes): on Azure the database is Azure Database for
+#     PostgreSQL Flexible Server (DATABASE_URL with ?sslmode=require) and /app/data is the Azure Files share
+#     `subs-data`, mounted after every deploy by scripts/azure_mount_data.py (the deployer resets volumes).
+#
+# Local Docker: `docker compose up -d --build` merges compose.override.yaml (db, volumes, loopback port, no sign-in)
+# on top of this file automatically -> http://127.0.0.1:8021.
+services:
+  app:
+    build:
+      context: .
+      dockerfile: services/app/Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      # The Container App FQDN (az-deploy-agent names the app <repo>-<service>; check it in the first-pass report).
+      APP_ALLOWED_HOSTS: ${APP_ALLOWED_HOSTS:-shiperp-subscription-db-app.bravesmoke-02934eef.westus2.azurecontainerapps.io}
+      SP_ALLOWED_HOSTS: ${SP_ALLOWED_HOSTS:-}
+      SP_TENANT_ID: ${SP_TENANT_ID}
+      SP_CLIENT_ID: ${SP_CLIENT_ID}
+      SP_CLIENT_SECRET: ${SP_CLIENT_SECRET}
+      SP_SUBSCRIPTION_URL: ${SP_SUBSCRIPTION_URL}
+      SP_MAINTENANCE_URL: ${SP_MAINTENANCE_URL}
+      # Microsoft sign-in (app/auth.py), same flow as shiperp-dashboard. Never disabled on Azure.
+      AUTH_DISABLED: "0"
+      ALLOWED_GROUP: ${ALLOWED_GROUP:-de1f99e4-f21c-41ed-81a1-fa5305ae9a0f}   # "ShipERP Dashboard Users" (not a secret)
+      ALLOWED_USERS: ${ALLOWED_USERS:-}
+      ENTRA_TENANT_ID: ${ENTRA_TENANT_ID}
+      ENTRA_CLIENT_ID: ${ENTRA_CLIENT_ID}
+      ENTRA_CLIENT_SECRET: ${ENTRA_CLIENT_SECRET}
+      REDIRECT_URI: ${REDIRECT_URI}
+      SESSION_SECRET_KEY: ${SESSION_SECRET_KEY}
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8001/healthz', timeout=4).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      replicas: 1                     # Refresh rebuilds the tables in one process (app/refresh.py lock): one writer
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 1G
+    x-azure:
+      min_replicas: 1                 # never scale to zero mid-refresh, never two writers
+      max_replicas: 1
+    restart: unless-stopped

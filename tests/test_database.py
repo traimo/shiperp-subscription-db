@@ -72,6 +72,28 @@ def test_copy_keeps_rows_figures_and_sequences(imported, new_schema):
         assert c.id > top
 
 
+def test_copy_works_without_superuser(imported, new_schema, monkeypatch):
+    """Azure Database for PostgreSQL has no superuser: `SET session_replication_role` is refused there, so FK
+    triggers stay on and the copy must succeed on table order alone (backups, restore and Refresh depend on it)."""
+    Session, _ = imported
+    real_text = dbcopy.text
+    refused = []
+
+    def no_superuser(sql, *a, **kw):
+        if "session_replication_role" in str(sql):
+            refused.append(sql)
+            return real_text("SELECT pg_catalog.no_such_function_like_a_refused_set()")   # raises -> fallback path
+        return real_text(sql, *a, **kw)
+
+    monkeypatch.setattr(dbcopy, "text", no_superuser)
+    before = refresh.figures(Session, TODAY)
+    eng = new_schema()
+    counts = dbcopy.copy_engines(Session.kw["bind"], eng)
+    assert refused, "the superuser-only statement was not attempted"
+    assert all(c.source == c.copied for c in counts) and sum(c.copied for c in counts) > 0
+    assert refresh.figures(sessionmaker(bind=eng, expire_on_commit=False), TODAY) == before
+
+
 def test_copy_refuses_an_old_source(new_schema):
     old, dst = new_schema(), new_schema()
     with old.begin() as c:

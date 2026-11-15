@@ -14,7 +14,7 @@ from GitHub → Settings → Applications.
 ## 2. What your repo must contain
 
 ```
-docker-compose.yml          # one service per container app
+compose.yaml                # one service per container app (az-deploy-agent reads this name only)
 services/<name>/Dockerfile  # one Dockerfile per service (any layout; path set in compose `build`)
 ```
 

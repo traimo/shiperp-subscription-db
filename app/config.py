@@ -1,4 +1,4 @@
-"""Settings. The database is PostgreSQL: DATABASE_URL from the environment (docker-compose.yml sets it for the app
+"""Settings. The database is PostgreSQL: DATABASE_URL from the environment (compose.override.yaml sets it for the local app
 container); on the host it defaults to the compose database at 127.0.0.1:5433 with POSTGRES_PASSWORD from .env."""
 from __future__ import annotations
 

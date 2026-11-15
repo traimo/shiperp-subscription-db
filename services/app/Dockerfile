@@ -1,4 +1,4 @@
-# Subscription database UI (FastAPI). Build context = repo root (see docker-compose.yml).
+# Subscription database UI (FastAPI). Build context = repo root (see compose.yaml).
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

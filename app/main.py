@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import or_, select
 
-from . import config, csvsafe, metrics, services
+from . import auth, config, csvsafe, metrics, services
 from .db import SessionLocal
 from .money import D, D0, ZERO, cents
 from .importer.sheet.rules import HYBRID_CLASS
@@ -36,8 +36,8 @@ TODAY = None                            # tests may pin "today"
 # The app runs on the user's own machine without sign-in, so a web page open in the same browser must not be able to
 # drive it: only these host names are served (blocks DNS rebinding) and form posts must come from the app's own pages.
 # "testserver" is the host name of Starlette's TestClient. More hosts: APP_ALLOWED_HOSTS=name1,name2 in .env.
-ALLOWED_HOSTS = ["127.0.0.1", "localhost", "[::1]", "testserver",
-                 *[h.strip() for h in os.environ.get("APP_ALLOWED_HOSTS", "").split(",") if h.strip()]]
+AUTH = auth.Settings.from_env()       # Microsoft sign-in settings (installed below, after the host check)
+ALLOWED_HOSTS = ["127.0.0.1", "localhost", "[::1]", "testserver", *AUTH.allowed_hosts]
 
 
 @app.middleware("http")
@@ -67,6 +67,8 @@ class _TrustedHostExceptHealth(TrustedHostMiddleware):
 
 app.add_middleware(_TrustedHostExceptHealth, allowed_hosts=ALLOWED_HOSTS)
 
+auth.install(app, AUTH)          # Microsoft sign-in (AUTH_DISABLED=1 only when reachable on this machine alone)
+
 
 @app.get("/healthz")
 def healthz():
@@ -79,7 +81,8 @@ def today() -> dt.date:
 
 
 def actor() -> str:
-    return os.environ.get("APP_USER") or getpass.getuser()
+    """Who made the change, for the audit log: the signed-in e-mail; APP_USER / the OS user when sign-in is off."""
+    return auth.CURRENT_EMAIL.get() or os.environ.get("APP_USER") or getpass.getuser()
 
 
 def money(v):

@@ -62,7 +62,9 @@ maintenance line, period, TCV, ARR and sheet ref. Re-imports keep the links (re-
 unmatched ones stay on the customer as "unlinked").
 
 ## Run in Docker (PostgreSQL)
-`docker-compose.yml` runs the app (`http://localhost:8021`) on PostgreSQL (`db`, host port `127.0.0.1:5433`).
+`compose.yaml` (the app, also the Azure deploy contract) plus `compose.override.yaml` (local only: `db`, volumes,
+loopback port, sign-in off; merged automatically) run the app (`http://127.0.0.1:8021`) on PostgreSQL (`db`, host port
+`127.0.0.1:5433`).
 `.env` needs `POSTGRES_PASSWORD` and `DASHBOARD_DB_PASSWORD` (hex; see `.env.example`) besides the `SP_*` values.
 ```powershell
 docker compose up -d --build                      # app runs `alembic upgrade head`, then serves; /healthz = probe
@@ -104,8 +106,14 @@ additional purchase, decommission, convert to subscription, terminate.
 Reload only maintenance from the workbook (keeps subscriptions and their app changes; refuses if maintenance was changed
 in the app): `python -m app.importer --maintenance-only`.
 
+## Sign-in
+Microsoft (Entra ID) sign-in, the same flow as shiperp-dashboard (`app/auth.py`): `/login` -> Microsoft ->
+`/auth/callback`; access for members of `ALLOWED_GROUP` and/or e-mails on `ALLOWED_USERS`; the audit log records the
+signed-in e-mail. `AUTH_DISABLED=1` (the local Docker default) turns it off, and the app refuses to start that way when
+`APP_ALLOWED_HOSTS` names any non-loopback host. With sign-in on, `SESSION_SECRET_KEY` (32+ characters) is required.
+
 ## Safety on the local machine
-The app has no sign-in (it runs on the user's own machine), so it protects itself from other web pages open in the
+With sign-in off locally, the app protects itself from other web pages open in the
 same browser: it answers only to `127.0.0.1` / `localhost` (add names with `APP_ALLOWED_HOSTS` in `.env`), form
 posts from another site are refused (Origin / Referer check), `back` links only go to pages of the app, and CSV exports
 prefix text cells starting with `= + - @` with an apostrophe so Excel does not run them as formulas.
@@ -176,5 +184,43 @@ sheet still carries after a cancellation date (e.g. #80239 cancelled 11/30/2024)
 Future-year (2027+) differences are mostly cells the sheet never filled.
 
 ## Not covered yet
-Editing maintenance fees in the UI (read-only today), users/roles (actor = Windows user), deferred revenue / GL tie-out, attachments,
-Salesforce/QuickBooks integration, deployment.
+Editing maintenance fees in the UI (read-only today), roles beyond one access group, deferred revenue / GL tie-out, attachments,
+Salesforce/QuickBooks integration.
+
+## Azure (planned deployment)
+az-deploy-agent deploys `compose.yaml` to the private Container Apps environment `cae-agents-private` (westus2,
+VPN only), one replica.
+
+Data resources live in their own resource group `rg-data-shiperp-subscription-db` (never `rg-app-…`, so tearing the
+app down cannot delete the data):
+- PostgreSQL Flexible Server `psql-shiperp-subs` (PG 16, B1ms, 32 GB, 7-day backups), public access **disabled**,
+  reached through private endpoint `pe-psql-shiperp-subs` (10.60.0.4 in `snet-azure-ai`; the VNet has no room for a
+  delegated subnet) and the private DNS zone `privatelink.postgres.database.azure.com`. Logins: `pgadmin` (server
+  admin), `subs` (owns database `subscriptions` and schema `public`; the app's login), `dashboard_ro` (SELECT only).
+- Storage account `stshiperpsubsdata`, share `subs-data` (public access disabled, private endpoint 10.60.0.6),
+  registered on `cae-agents-private` as environment storage `subs-data`, mounted on `/app/data`.
+
+Neither is reachable from outside the VNet. To work on them from a PC that is not on the office network, open public
+access for one IP for the duration and close it again (`az postgres flexible-server update --public-access …` plus a
+firewall rule; `az storage account update --public-network-access …` plus a network rule).
+
+`DATABASE_URL` (Key Vault secret `database-url`) must end in `?sslmode=require`. `/app/data` is the Azure Files share
+mounted after the deploy (spreadsheet-check acceptances and reports live there).
+
+Sign-in reuses **shiperp-dashboard's Entra app** (same tenant, client and access group "ShipERP Dashboard Users").
+The app's host name is fixed by the deployer as `<repo>-<service>`:
+`shiperp-subscription-db-app.bravesmoke-02934eef.westus2.azurecontainerapps.io` (the `APP_ALLOWED_HOSTS` default in
+compose.yaml; change it there if the first-pass report shows another name).
+
+Deploy, step by step (tests and a review first, per the deploy rules):
+1. Once: install the `az-deploy-agent-shiperp` GitHub App on the repository, and add
+   `https://shiperp-subscription-db-app.bravesmoke-02934eef.westus2.azurecontainerapps.io/auth/callback` to the
+   dashboard Entra app's web redirect URIs.
+2. `uv run az-deploy-agent deploy --repo traimo/shiperp-subscription-db --ref main --exposure private` (from the
+   AZ-Deploy-Agent folder). The first pass creates `rg-app-shiperp-subscription-db` and an empty Key Vault, then stops.
+3. `python scripts/azure_secrets.py --vault <vault from the report>` fills it: `sp-*` from `.env`, `entra-*` from
+   shiperp-dashboard's `.env`, `database-url` (login `subs`, `?sslmode=require`), a fresh `session-secret-key`,
+   `redirect-uri`. `--dry-run` first lists what it will set; values are never printed.
+4. Run the same deploy command again: builds and deploys the app.
+5. `python scripts/azure_mount_data.py` mounts the share on `/app/data`. **After every redeploy too**: the deployer
+   always resets the app's volumes. `--check` tells whether it is mounted.

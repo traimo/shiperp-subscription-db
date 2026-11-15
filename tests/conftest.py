@@ -29,6 +29,8 @@ def _test_url() -> str:
 
 TEST_URL = _test_url()
 os.environ["DATABASE_URL"] = TEST_URL         # before any app import: the app's own engine uses the test database
+os.environ["AUTH_DISABLED"] = "1"             # page tests run without sign-in (tests/test_auth.py covers sign-in)
+os.environ["APP_ALLOWED_HOSTS"] = ""          # loopback only, so AUTH_DISABLED is allowed whatever .env says
 
 import pytest                                  # noqa: E402
 from sqlalchemy import create_engine, text     # noqa: E402

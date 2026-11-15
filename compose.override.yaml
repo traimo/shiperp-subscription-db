@@ -1,0 +1,65 @@
+# Local Docker only: merged on top of compose.yaml automatically by `docker compose up -d --build`
+#   -> http://127.0.0.1:8021, PostgreSQL in the `db` container (host port 127.0.0.1:5433).
+# az-deploy-agent reads compose.yaml alone, so nothing here reaches Azure. No secret values here: `${NAME}` entries
+# are filled from the project .env (gitignored).
+# The shiperp-dashboard container reads the data as `dashboard_ro` at db:5432 by joining the `shiperp` network
+# (declare it there as `networks: {shiperp: {external: true}}`). From the host: 127.0.0.1:5433 (not "localhost": on
+# Windows that tries IPv6 first and each connection stalls).
+name: shiperp-subscription-db
+
+services:
+  app:
+    environment:
+      DATABASE_URL: postgresql+psycopg://subs:${POSTGRES_PASSWORD}@db:5432/subscriptions
+      APP_USER: ${APP_USER:-}
+      APP_ALLOWED_HOSTS: ${APP_ALLOWED_HOSTS:-}      # loopback only locally (not the Azure FQDN from compose.yaml)
+      # Sign-in is off by default locally; the app refuses that when APP_ALLOWED_HOSTS names a non-loopback host.
+      AUTH_DISABLED: ${AUTH_DISABLED:-1}
+      ALLOWED_GROUP: ${ALLOWED_GROUP:-}
+      ENTRA_TENANT_ID: ${ENTRA_TENANT_ID:-}
+      ENTRA_CLIENT_ID: ${ENTRA_CLIENT_ID:-}
+      ENTRA_CLIENT_SECRET: ${ENTRA_CLIENT_SECRET:-}
+      REDIRECT_URI: ${REDIRECT_URI:-}
+      SESSION_SECRET_KEY: ${SESSION_SECRET_KEY:-}
+    ports: !override
+      - "127.0.0.1:8021:8001"         # this machine only
+    volumes:
+      - appdata:/app/data             # workbooks pulled by Refresh, backups, reports, spreadsheet-check results
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [shiperp]
+
+  db:
+    build:
+      context: .
+      dockerfile: services/db/Dockerfile
+    environment:
+      POSTGRES_DB: subscriptions
+      POSTGRES_USER: subs
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DASHBOARD_DB_PASSWORD: ${DASHBOARD_DB_PASSWORD}
+    ports:
+      - "127.0.0.1:5433:5432"         # host tools / seed script; 5432 is taken on this machine
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U subs -d subscriptions"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 1G
+    networks: [shiperp]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  appdata:
+
+networks:
+  shiperp:
+    name: shiperp
