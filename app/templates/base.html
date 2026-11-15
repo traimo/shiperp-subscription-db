@@ -27,6 +27,7 @@
   {% else %}<span class="file">POC 2 · PostgreSQL</span>{% endif %}
 </header>
 <main>
+{% set _mount = data_mount_problem() %}{% if _mount %}<div class="alert err" role="alert"><strong>Data folder not mounted.</strong> {{ _mount }}</div>{% endif %}
 {% set _u = request.query_params.get('undo') %}{% if _u and _u.isdigit() %}<div class="alert ok" style="display:flex;gap:12px;align-items:center">Change saved. <a class="btn small" href="/audit/{{ _u }}/undo?back={{ request.url.path|urlencode }}">Undo this change</a></div>{% endif %}
 {% block content %}{% endblock %}
 </main>

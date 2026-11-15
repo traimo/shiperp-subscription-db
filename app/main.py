@@ -8,6 +8,7 @@ from urllib.parse import quote, urlencode
 import getpass
 import io
 import json
+import logging
 import os
 from decimal import Decimal
 from pathlib import Path
@@ -72,8 +73,16 @@ auth.install(app, AUTH)          # Microsoft sign-in (AUTH_DISABLED=1 only when 
 
 @app.get("/healthz")
 def healthz():
-    """Liveness for Docker / container probes. Does not touch the database."""
-    return JSONResponse({"status": "ok"})
+    """Liveness for Docker / container probes. Does not touch the database. On Azure it also says whether data/ is the
+    Azure Files share, but stays 200 either way (a failing probe would block the deploy; the page banner is the alarm)."""
+    body = {"status": "ok"}
+    if os.environ.get("CONTAINER_APP_NAME"):
+        body["data_mount"] = "missing" if config.data_mount_problem() else "ok"
+    return JSONResponse(body)
+
+
+if config.data_mount_problem():
+    logging.getLogger(__name__).warning("DATA MOUNT: %s", config.data_mount_problem())
 
 
 def today() -> dt.date:
@@ -103,7 +112,7 @@ def fdate(v):
 
 templates.env.filters.update(money=money, fdate=fdate)
 templates.env.globals.update(metrics=metrics, Platform=Platform, CheckResult=CheckResult,
-                             TerminationReason=TerminationReason)
+                             TerminationReason=TerminationReason, data_mount_problem=config.data_mount_problem)
 
 
 def render(request: Request, template: str, **ctx):

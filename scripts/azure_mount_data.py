@@ -1,10 +1,12 @@
-"""Mount the Azure Files share `subs-data` on /app/data of the hosted app. Run it after EVERY az-deploy-agent deploy.
+"""Mount the Azure Files share `subs-data` on /app/data of the hosted app (manual fallback), or --check that it is.
 
     python scripts/azure_mount_data.py [--check]
 
-Why: the deployer's Container Apps template always sets the app's volumes to [] (compose.yaml may not declare
-volumes), so each redeploy unmounts the share. Without it the app still runs, but /app/data is the container's own
-disk: spreadsheet-check acceptances, reports and the pulled workbooks are lost on the next restart.
+compose.yaml declares the share under `x-azure.azure_files`; an az-deploy-agent that supports that mounts it on every
+deploy and this script is only needed for --check. An older deployer sets the app's volumes to [] on each deploy:
+then run this right after the deploy. Without the share the app still runs (with a red banner on every page), but
+/app/data is the container's own disk: spreadsheet-check acceptances, reports and the pulled workbooks are lost on
+the next restart. The mount must match compose.yaml (tests/test_data_mount.py checks it).
 
 The share is registered once on the environment (`az containerapp env storage set ... --storage-name subs-data`).
 This script patches only the app's template (volumes + the container's volumeMounts), which makes a new revision.

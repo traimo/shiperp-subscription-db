@@ -2,6 +2,7 @@
 container); on the host it defaults to the compose database at 127.0.0.1:5433 with POSTGRES_PASSWORD from .env."""
 from __future__ import annotations
 
+import functools
 import os
 from pathlib import Path
 
@@ -50,6 +51,26 @@ def database_label(url: str | None = None) -> str:
     from sqlalchemy.engine import make_url
     u = make_url(url or database_url())
     return f"PostgreSQL · {u.database} on {u.host}{f':{u.port}' if u.port else ''}"
+
+
+@functools.lru_cache(maxsize=1)
+def data_mount_problem() -> str | None:
+    """On Azure Container Apps (CONTAINER_APP_NAME is set there), data/ must be the Azure Files share `subs-data`:
+    without it, check acceptances, reports and pulled workbooks go to the container's own disk and are lost at the next
+    restart. Returns what is wrong, or None (always None off Azure). Checked once per process: mounting the share makes
+    a new revision anyway."""
+    if not os.environ.get("CONTAINER_APP_NAME"):
+        return None
+    if not os.path.ismount(DATA_DIR):
+        return (f"{DATA_DIR} is not the Azure Files share: files saved now are lost at the next restart. "
+                "Run python scripts/azure_mount_data.py.")
+    probe = DATA_DIR / f".write-check-{os.getpid()}"
+    try:
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+    except OSError as e:
+        return f"{DATA_DIR} is mounted but not writable ({e.__class__.__name__}): check the share's mount options."
+    return None
 
 
 def maintenance_workbook() -> Path | None:

@@ -222,5 +222,8 @@ Deploy, step by step (tests and a review first, per the deploy rules):
    shiperp-dashboard's `.env`, `database-url` (login `subs`, `?sslmode=require`), a fresh `session-secret-key`,
    `redirect-uri`. `--dry-run` first lists what it will set; values are never printed.
 4. Run the same deploy command again: builds and deploys the app.
-5. `python scripts/azure_mount_data.py` mounts the share on `/app/data`. **After every redeploy too**: the deployer
-   always resets the app's volumes. `--check` tells whether it is mounted.
+5. Check `/app/data`: `python scripts/azure_mount_data.py --check`. compose.yaml declares the share under
+   `x-azure.azure_files`, so an az-deploy-agent that supports it mounts it on every deploy (it refuses to deploy when
+   the environment storage `subs-data` is missing). With an older deployer the mount is dropped on each redeploy: then
+   run `python scripts/azure_mount_data.py` right after. While `/app/data` is not the share, every page shows a red
+   "Data folder not mounted" banner and `/healthz` reports `"data_mount": "missing"` (still 200).

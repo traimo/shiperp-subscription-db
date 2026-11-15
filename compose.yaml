@@ -4,7 +4,9 @@
 #   - `${NAME:-default}` / literals = plain settings.
 #   - No `db` service and no volumes here (the deployer rejects volumes): on Azure the database is Azure Database for
 #     PostgreSQL Flexible Server (DATABASE_URL with ?sslmode=require) and /app/data is the Azure Files share
-#     `subs-data`, mounted after every deploy by scripts/azure_mount_data.py (the deployer resets volumes).
+#     `subs-data`, declared under `x-azure.azure_files` (the deployer mounts it on every deploy; Docker Compose ignores
+#     x- keys). With an older deployer that ignores it, run scripts/azure_mount_data.py after the deploy; the app shows
+#     a red banner on every page while /app/data is not the share.
 #
 # Local Docker: `docker compose up -d --build` merges compose.override.yaml (db, volumes, loopback port, no sign-in)
 # on top of this file automatically -> http://127.0.0.1:8021.
@@ -49,4 +51,8 @@ services:
     x-azure:
       min_replicas: 1                 # never scale to zero mid-refresh, never two writers
       max_replicas: 1
+      azure_files:                    # environment storage on cae-agents-private -> share subs-data (stshiperpsubsdata)
+        - storage: subs-data
+          target: /app/data
+          mount_options: "uid=10001,gid=10001,dir_mode=0750,file_mode=0640"   # the image's `app` user
     restart: unless-stopped
