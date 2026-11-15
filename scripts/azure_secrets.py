@@ -117,6 +117,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Missing: {', '.join(missing)}. Add them first.")
         return 1
 
+    found = subprocess.run(["az", "keyvault", "show", "--name", args.vault, "--query", "name", "-o", "tsv",
+                            "--only-show-errors"], capture_output=True, text=True, shell=(os.name == "nt"))
+    if found.returncode != 0:
+        print(f"Key Vault {args.vault} not found. Run the deployer's first pass and approve 'prepare app resource "
+              "group' first: it creates the vault and gives you Key Vault Secrets Officer on it.")
+        return 2
+
     ok = True
     for name in ALL:
         good = set_secret(args.vault, kv_name(name), values[name])
