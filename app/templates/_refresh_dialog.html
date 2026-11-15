@@ -1,24 +1,17 @@
-<form method="post" action="/refresh" enctype="multipart/form-data">
+<form method="post" action="/refresh">
 <h2>Refresh data from the workbooks</h2>
-<p class="sub" style="margin-bottom:10px">Re-imports the two workbooks into the database and shows how the numbers changed. The database is backed up first.</p>
+<p class="sub" style="margin-bottom:10px">Pulls the latest workbooks from SharePoint (read-only), re-imports them and shows how the numbers changed. The database is backed up first.</p>
 
-<p style="margin:8px 0 2px;font-weight:600">Which workbooks?</p>
-{% if not sp_error %}
-<label class="choice"><input type="radio" name="source" value="sharepoint" checked> Pull the latest from SharePoint (read-only)</label>
-<table style="margin:0 0 8px 24px">
+{% if sp_error %}
+<div class="alert err">Refresh needs SharePoint, which cannot be reached right now - nothing can be refreshed: {{ sp_error }}</div>
+{% else %}
+<table style="margin-bottom:10px">
   <tr><th>Workbook on SharePoint</th><th>Last modified</th><th></th></tr>
   {% for f in files %}<tr><td>{{ f.name }}</td>
     <td style="white-space:nowrap">{{ f.modified.strftime('%m/%d/%Y %H:%M') if f.modified else '' }}{% if f.modified_by %} by {{ f.modified_by }}{% endif %}</td>
     <td>{% if imported and f.modified %}{% if f.modified > imported %}<span class="badge b-warning">changed since last import</span>{% else %}<span class="badge b-muted">unchanged</span>{% endif %}{% endif %}</td></tr>{% endfor %}
 </table>
 {% endif %}
-<label class="choice"><input type="radio" name="source" value="upload"{% if sp_error %} checked{% endif %}> Upload the workbooks from this computer</label>
-<div style="margin:2px 0 8px 24px;display:grid;gap:6px">
-  <label>Subscription Summary workbook (.xlsx, required)<br><input type="file" name="subscription_file" accept=".xlsx"></label>
-  <label>Maintenance workbook (.xlsx, optional - leave empty to keep {{ local_files.get('maintenance') or 'the current one' }})<br><input type="file" name="maintenance_file" accept=".xlsx"></label>
-</div>
-<label class="choice"><input type="radio" name="source" value="local"{% if not local_files %} disabled{% endif %}> Re-import the workbooks already in the app{% if local_files %} ({{ local_files.values()|join(', ') }}){% else %} (none yet){% endif %}</label>
-{% if sp_error %}<p class="muted" style="margin:4px 0 0;font-size:12.5px">SharePoint pull not available: {{ sp_error }}</p>{% endif %}
 <p class="muted" style="margin:4px 0 8px">Last import: {{ imported.strftime('%m/%d/%Y %H:%M') if imported else 'none' }}</p>
 <div class="alert {{ 'warn' if check_blocking else 'ok' }}" style="font-size:13px">{{ check_msg }}</div>
 
@@ -31,7 +24,7 @@
     <td>{% if kind == 'can' %}<span class="badge b-ok">can reapply</span>{% elif kind == 'kept' %}<span class="badge b-muted">kept anyway</span>{% else %}<span class="badge b-warning">manual</span>{% endif %}</td></tr>{% endfor %}
 </table></div>
 <p style="margin:8px 0 2px;font-weight:600">Reapply these changes after the import?</p>
-<label class="choice"><input type="radio" name="reapply" value="no" checked> <b>Do not reapply</b> - show the workbooks exactly as they are. The changes are removed; a backup and the change list are kept in <span class="mono">data\backups</span>.</label>
+<label class="choice"><input type="radio" name="reapply" value="no" checked> <b>Do not reapply</b> - show the workbooks exactly as they are. The changes are removed; a database backup and the change list are kept (see <a href="/db">Database</a>).</label>
 <label class="choice"><input type="radio" name="reapply" value="yes"> Reapply the {{ n_can }} change{{ 's' if n_can != 1 }} that can be reapplied (each gets an Undo); the rest are listed for you to redo by hand. Changes already in the workbook are skipped.</label>
 {% else %}
 <input type="hidden" name="reapply" value="no">
@@ -40,6 +33,6 @@
 
 <div class="actions" style="margin-top:14px;justify-content:flex-end">
   <button type="button" class="btn" data-close>Cancel</button>
-  <button type="submit" class="btn primary">Refresh</button>
+  <button type="submit" class="btn primary"{% if sp_error %} disabled{% endif %}>Refresh</button>
 </div>
 </form>

@@ -235,21 +235,29 @@ def test_dialog_defaults_to_do_not_reapply(env, monkeypatch):
     assert 'name="reapply" value="no" checked' in html
     assert 'value="yes" checked' not in html
     assert f"{n0 + 8} changes made in the app since the last import" in html
-    assert 'name="source" value="upload" checked' in html and "not set up" in html   # no SharePoint: upload
+    assert "Refresh needs SharePoint" in html and "not set up" in html               # SharePoint only
+    assert '<button type="submit" class="btn primary" disabled>' in html
+    assert 'type="file"' not in html and 'name="source"' not in html
 
 
 @needs_source
-def test_refresh_post_and_result_page(env, monkeypatch):
+def test_refresh_post_and_result_page(env, sp_env, monkeypatch, tmp_path):
     S, eng, paths = env
-    monkeypatch.delenv("SP_SUBSCRIPTION_URL", raising=False)
+    remote = tmp_path / "remote"
+    shutil.copytree(paths.source, remote)
+    monkeypatch.setattr(sharepoint, "GraphClient", lambda: FakeGraph(remote))
     make_changes(S)
     client = TestClient(main.app)
+    # the form always pulls from SharePoint; a leftover "source" field from an old page changes nothing
     res = client.post("/refresh", data={"source": "local", "reapply": "no"}, follow_redirects=False)
     assert res.status_code == 303 and res.headers["location"] == "/refresh/result?done=1"
+    assert refresh.last_result(paths)["pulled"] is True
+    assert len(list(paths.backups.glob("source-*/*.xlsx"))) == 2                # replaced by the SharePoint copies
     page = client.get(res.headers["location"]).text
-    assert "How the numbers changed" in page and "changes not reapplied" in page
+    assert "How the numbers changed" in page and "changes not reapplied" in page and "pulled from SharePoint" in page
     assert customer(S, 89990) is None
-    res = client.post("/refresh", data={"source": "sharepoint"}, follow_redirects=False)   # not configured
+    monkeypatch.delenv("SP_SUBSCRIPTION_URL")                                   # SharePoint not configured
+    res = client.post("/refresh", data={"reapply": "no"}, follow_redirects=False)
     assert "error=" in res.headers["location"]
 
 

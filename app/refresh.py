@@ -28,7 +28,6 @@ from .money import cents
 
 PATTERNS = {"subscription": "*Subscription Summary*.xlsx", "maintenance": "*Maintenance*.xlsx"}
 RESULT_FILE = "latest-refresh.json"
-MAX_UPLOAD = 25 * 1024 * 1024          # bytes per uploaded workbook
 _LOCK = threading.Lock()
 
 
@@ -77,41 +76,9 @@ def _swap_in(got: dict[str, Path], paths: Paths, stamp: str) -> None:
         shutil.copy2(p, paths.source / p.name)
 
 
-def safe_upload_name(name: str) -> str:
-    """The browser-sent file name, reduced to a plain .xlsx file name (no folders)."""
-    base = Path(str(name or "").replace("\\", "/")).name.strip()
-    if not base or base.startswith((".", "~$")) or not base.lower().endswith(".xlsx") or any(c in base for c in '<>:"|?*'):
-        raise RefreshError(f"'{name}' is not an .xlsx workbook name.")
-    return base
-
-
-def accept_uploads(paths: Paths, stamp: str, uploads: dict[str, tuple[str, Path]]) -> list[dict]:
-    """uploads: {key: (file name as uploaded, temp file)}. Checks every file, then swaps them into the source
-    folder. Nothing changes unless all are good. A workbook that is not uploaded keeps its current copy."""
-    if "subscription" not in uploads:
-        raise RefreshError("Choose the Subscription Summary workbook to upload.")
-    with tempfile.TemporaryDirectory() as tmp:
-        got = {}
-        for key, (name, src) in uploads.items():
-            name = safe_upload_name(name)
-            size = src.stat().st_size
-            if size == 0:
-                raise RefreshError(f"'{name}' is empty.")
-            if size > MAX_UPLOAD:
-                raise RefreshError(f"'{name}' is larger than {MAX_UPLOAD // (1024 * 1024)} MB.")
-            p = Path(tmp) / name
-            shutil.copyfile(src, p)
-            _check_workbook(key, p, name, where="uploaded")
-            got[key] = p
-        _swap_in(got, paths, stamp)
-        now = dt.datetime.now().isoformat(timespec="minutes")
-        return [{"key": k, "name": p.name, "size": p.stat().st_size, "modified_by": "uploaded", "modified": now}
-                for k, p in got.items()]
-
-
-def _check_workbook(key: str, path: Path, name: str, where: str = "SharePoint") -> None:
+def _check_workbook(key: str, path: Path, name: str) -> None:
     if not Path(name).match(PATTERNS[key]):
-        raise RefreshError(f"The {where} file '{name}' does not look like the {key} workbook "
+        raise RefreshError(f"The SharePoint file '{name}' does not look like the {key} workbook "
                            f"(expected a name like {PATTERNS[key]}).")
     try:
         from openpyxl import load_workbook
@@ -177,9 +144,10 @@ def figures(factory, today: dt.date) -> dict:
 # ------------------------------------------------------------------------------------------------ run
 
 def run(factory, actor: str, today: dt.date, reapply: bool = False, pull_from_sharepoint: bool = True,
-        paths: Paths | None = None, client=None, uploads: dict[str, tuple[str, Path]] | None = None) -> dict:
+        paths: Paths | None = None, client=None) -> dict:
     """The whole refresh. Returns (and saves) the result dict. Raises RefreshError before anything was changed
-    when the download or a check fails."""
+    when the download or a check fails. The app always pulls from SharePoint; pull_from_sharepoint=False (the
+    workbooks already in the source folder) is for tests and the command line."""
     paths = paths or PATHS
     if not _LOCK.acquire(blocking=False):
         raise RefreshError("A refresh is already running - wait a few seconds.")
@@ -191,14 +159,10 @@ def run(factory, actor: str, today: dt.date, reapply: bool = False, pull_from_sh
         result = {"started": started.isoformat(timespec="seconds"), "actor": actor, "reapply": reapply,
                   "pulled": pull_from_sharepoint, "files": [], "items": []}
 
-        if uploads:
-            pull_from_sharepoint = False
-            result["pulled"], result["uploaded"] = False, True
-            result["files"] = accept_uploads(paths, stamp, uploads)   # raises before anything changed
-        elif pull_from_sharepoint:
+        if pull_from_sharepoint:
             result["files"] = pull(paths, stamp, client)    # raises before anything changed
         srcs = local_sources(paths.source)
-        if not pull_from_sharepoint and not uploads:
+        if not pull_from_sharepoint:
             result["files"] = [{"key": k, "name": p.name, "size": p.stat().st_size, "modified_by": "",
                                 "modified": dt.datetime.fromtimestamp(p.stat().st_mtime).isoformat(timespec="minutes")}
                                for k, p in srcs.items()]

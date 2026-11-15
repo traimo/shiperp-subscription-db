@@ -1,5 +1,4 @@
-"""PostgreSQL specifics: migrations, schema copies, backups / restore, workbook upload, Database page."""
-import io
+"""PostgreSQL specifics: migrations, schema copies, backups / restore, Database page."""
 import shutil
 
 import pytest
@@ -131,76 +130,6 @@ def test_prune_keeps_the_newest(new_schema):
 def test_engine_for_only_opens_backups():
     with pytest.raises(ValueError):
         backups.engine_for("test_imported")
-
-
-# ------------------------------------------------------------------------------------------------ upload in Refresh
-
-def _upload(c, sub=None, maint=None, reapply="no"):
-    files = {}
-    if sub:
-        files["subscription_file"] = sub
-    if maint:
-        files["maintenance_file"] = maint
-    return c.post("/refresh", data={"source": "upload", "reapply": reapply}, files=files,
-                  headers={"origin": "http://testserver"}, follow_redirects=False)
-
-
-@needs_source
-def test_upload_replaces_the_workbooks_and_refreshes(env):  # noqa: F811
-    S, eng, paths = env
-    sub = config.source_workbook()
-    maint_before = sorted(p.name for p in paths.source.glob("*Maintenance*.xlsx"))
-    c = TestClient(main.app)
-    r = _upload(c, sub=(sub.name, sub.read_bytes(),
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
-    assert r.status_code == 303 and "done=1" in r.headers["location"]
-    res = refresh.last_result(paths)
-    assert res["uploaded"] and not res["pulled"] and res["backup"].startswith("backup_")
-    assert [f["name"] for f in res["files"]] == [sub.name]
-    assert sorted(p.name for p in paths.source.glob("*Maintenance*.xlsx")) == maint_before   # kept
-    assert len(list(paths.backups.glob("source-*/*.xlsx"))) == 1                             # old copy kept
-    drop_schema(None, res["backup"])
-
-
-@needs_source
-@pytest.mark.parametrize("name, body, msg", [
-    ("Q3 numbers.xlsx", None, "does not look like"),
-    ("x Subscription Summary.xlsx", b"not a workbook", "could not be opened"),
-    ("x Subscription Summary.csv", b"a,b", "not an .xlsx"),
-    ("x Subscription Summary.xlsx", b"", "is empty"),
-])
-def test_bad_uploads_change_nothing(env, name, body, msg):  # noqa: F811
-    S, eng, paths = env
-    if body is None:
-        body = config.source_workbook().read_bytes()
-    before = sorted((p.name, p.stat().st_mtime) for p in paths.source.iterdir())
-    figures = refresh.figures(S, TODAY)
-    r = _upload(TestClient(main.app), sub=(name, body, "application/octet-stream"))
-    assert r.status_code == 303 and "error=" in r.headers["location"]
-    page = TestClient(main.app).get(r.headers["location"]).text
-    assert msg.replace("'", "&#39;") in page or msg in page
-    assert sorted((p.name, p.stat().st_mtime) for p in paths.source.iterdir()) == before
-    assert refresh.figures(S, TODAY) == figures
-
-
-def test_upload_without_the_subscription_workbook_is_refused(env):  # noqa: F811
-    r = _upload(TestClient(main.app))
-    assert "error=" in r.headers["location"] and "Subscription" in r.headers["location"].replace("+", " ")
-
-
-def test_upload_names_are_reduced_to_a_file_name():
-    assert refresh.safe_upload_name(r"C:\Users\x\2. Subscription Summary.xlsx") == "2. Subscription Summary.xlsx"
-    assert refresh.safe_upload_name("../../etc/x Subscription Summary.xlsx") == "x Subscription Summary.xlsx"
-    for bad in ("", "..", "~$x.xlsx", ".x.xlsx", "x.xlsm"):
-        with pytest.raises(refresh.RefreshError):
-            refresh.safe_upload_name(bad)
-
-
-@needs_source
-def test_refresh_dialog_offers_upload(env):  # noqa: F811
-    page = TestClient(main.app).get("/refresh/dialog").text
-    assert 'enctype="multipart/form-data"' in page and 'name="subscription_file"' in page
-    assert 'value="local"' in page and "disabled" not in page.split('value="local"')[1].split(">")[0]
 
 
 # ------------------------------------------------------------------------------------------------ Database page

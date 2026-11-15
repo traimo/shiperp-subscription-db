@@ -69,8 +69,8 @@ docker compose up -d --build                      # app runs `alembic upgrade he
 python -m pip install -r requirements.txt         # host side: tests and scripts
 python -m pytest -q                               # needs the db container (uses database subs_test)
 ```
-- **Import the spreadsheets** into Postgres with the header's **Refresh data**: upload the two workbooks from your
-  computer, pull them from SharePoint, or re-import the copies already in the app. Command line:
+- **Import the spreadsheets** into Postgres with the header's **Refresh data**: it always pulls the two workbooks
+  from SharePoint (the single source of truth). Command line (re-imports the copies last pulled):
   `docker compose exec app python -m app.importer`.
 - **Backups**: before every Refresh / import the whole database is copied into its own schema
   (`backup_YYYYMMDD_HHMMSS`, `app/backups.py`); the newest 10 are kept and listed on the Database page. Put one back
@@ -136,14 +136,13 @@ throwaway schema (`sheetcheck_<pid>`, dropped afterwards) - the live tables and 
    asks to confirm while errors are open or a workbook changed since the check (`--yes` skips the question).
 
 ## Refresh data (header button)
-Loads the workbooks (the production source of truth until go-live) into the database. **Refresh data** opens a popup
-with three sources - **upload** the two workbooks from this computer (Subscription Summary required; Maintenance
-optional, the current copy is kept if left empty; .xlsx, max 25 MB each), **pull** them from SharePoint (when set up;
-shows last modified / by whom / changed since the last import), or re-import the copies **already in the app** - plus
-the spreadsheet check status and the changes made in the app since the last import, then:
+Loads the workbooks on SharePoint (the production source of truth until go-live) into the database - always from
+SharePoint, never from files on a laptop. **Refresh data** opens a popup showing the two workbooks on SharePoint (last
+modified, by whom, changed since the last import?), the spreadsheet check status and the changes made in the app since
+the last import, then:
 
-1. checks the new workbooks (name, opens as Excel) and swaps them into `data/source` (old copies ->
-   `data/backups/source-<stamp>/`); nothing changes if one is bad;
+1. downloads both workbooks (read-only Microsoft Graph), checks them (name, opens as Excel) and swaps them into
+   `data/source` (old copies -> `data/backups/source-<stamp>/`); nothing changes if one is bad;
 2. backs up the database into a `backup_YYYYMMDD_HHMMSS` schema and saves the change list
    (`data/backups/audit-before-refresh-<stamp>.json`); the column check (renamed / look-alike columns) refuses here,
    before any table is touched;
@@ -158,8 +157,8 @@ the spreadsheet check status and the changes made in the app since the last impo
 
 Setup (`.env`): `SP_TENANT_ID`, `SP_CLIENT_ID`, `SP_CLIENT_SECRET` (Entra app with Sites.Selected **read** on the
 fi_team site) and the sharing links `SP_SUBSCRIPTION_URL`, `SP_MAINTENANCE_URL`. The app only reads the workbooks; it
-never writes to SharePoint, and contract documents stay links-only. Without these the popup offers upload and the
-copies already in the app.
+never writes to SharePoint, and contract documents stay links-only. If SharePoint cannot be reached (not set up, no
+access, offline), the popup shows why and the Refresh button is disabled - nothing changes.
 
 ## Import rules (see the Import page for every decision with its sheet reference)
 - A → NET_NEW subscription + INITIAL term; B → CONVERSION; C → ADD_ON; D → RENEWAL superseding the rows named in the
