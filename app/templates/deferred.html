@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Deferred Billing{% endblock %}
+{% block content %}
+<h1>Deferred Billing</h1>
+<p class="sub">Remaining deferred billing at each month-end: TCV ("TCV - NN &amp; Existing") less the amounts invoiced
+  up to that date. A term counts from its start or first invoice, whichever is earlier. Each month shows the balance
+  at month-end and the amount invoiced in that month (shaded). {{ rows|length }} customers{% if not f.all %} with a balance{% endif %}.</p>
+<form class="filters" method="get">
+  <div style="min-width:240px"><label>Number or name</label><input name="q" value="{{ f.q }}" placeholder="80018 or allison"></div>
+  <div><label>Platform</label><select name="platform"><option value="">All</option>{% for p in Platform %}<option value="{{ p.value }}" {{ 'selected' if f.platform == p.value }}>{{ p.value }}</option>{% endfor %}</select></div>
+  <div><label>Customers</label><select name="all"><option value="">With a balance</option><option value="1" {{ 'selected' if f.all }}>All, incl. fully billed</option></select></div>
+  <div><button class="btn primary">Filter</button> <a class="btn" href="/deferred-billing">Reset</a>
+    <a class="btn" href="/deferred-billing.xlsx?{{ request.url.query }}" title="Download this view (same filters) as an Excel file">Download Excel</a></div>
+</form>
+{% if not months %}
+<p>No terms with a TCV or invoices.</p>
+{% else %}
+<div class="table-wrap deferred">
+<table>
+  <thead><tr class="h1">
+    <th class="fix" rowspan="2">Customer</th><th class="num" rowspan="2">TCV</th><th class="num cur-col" rowspan="2">Current balance<br>{{ months[current_index].strftime('%m/%Y') }}</th>
+    {% for m in months %}<th class="mon{{ ' cur' if loop.index0 == current_index }}" colspan="2">{{ m.strftime('%m/%Y') }}</th>{% endfor %}
+  </tr><tr class="h2">
+    {% for m in months %}<th class="num{{ ' cur' if loop.index0 == current_index }}">Balance</th><th class="num inv-h">Invoiced</th>{% endfor %}
+  </tr></thead>
+  <tbody>
+  {% for r in rows %}
+  {% set rid = r.customer.qb_number %}
+  <tr class="cust">
+    <td class="fix"><button type="button" class="tgl" data-rows="t{{ rid }}" title="Show the terms">&#9656;</button>
+      <a href="/customer/{{ rid }}">{{ rid }}</a> {{ r.customer.name }}</td>
+    <td class="num">{{ r.tcv|money }}</td>
+    <td class="num cur-col"><b>{{ r.current|money }}</b></td>
+    {% for b in r.balances %}{% set i = r.invoiced[loop.index0] %}<td class="num{{ ' cur' if loop.index0 == current_index }}">{{ '' if b is none else b|money }}</td><td class="num invc{{ ' inv' if i is not none }}">{{ '' if i is none else i|money }}</td>{% endfor %}
+  </tr>
+  {% for tr in r.terms %}
+  <tr class="term t{{ rid }}" hidden>
+    <td class="fix"><a href="/term/{{ tr.term.id }}">{{ tr.term.source_ref or ('Term ' ~ tr.term.id) }}</a>
+      <span class="muted">{{ tr.term.start_date|fdate }} &ndash; {{ tr.term.end_date|fdate }}</span></td>
+    <td class="num">{{ tr.term.tcv|money }}</td>
+    <td class="num cur-col">{{ tr.current|money }}</td>
+    {% for b in tr.balances %}{% set i = tr.invoiced[loop.index0] %}<td class="num{{ ' cur' if loop.index0 == current_index }}">{{ '' if b is none else b|money }}</td><td class="num invc{{ ' inv' if i is not none }}">{{ '' if i is none else i|money }}</td>{% endfor %}
+  </tr>
+  {% endfor %}
+  {% endfor %}
+  </tbody>
+  <tfoot><tr class="total">
+    <td class="fix"><b>Total</b></td><td class="num"><b>{{ tcv_total|money }}</b></td>
+    <td class="num cur-col"><b>{{ totals[current_index]|money }}</b></td>
+    {% for t in totals %}<td class="num{{ ' cur' if loop.index0 == current_index }}"><b>{{ t|money }}</b></td><td class="num invc"><b>{{ inv_totals[loop.index0]|money }}</b></td>{% endfor %}
+  </tr></tfoot>
+</table>
+</div>
+{% endif %}
+<script>
+document.querySelectorAll('.deferred .tgl').forEach(function (b) {
+  b.addEventListener('click', function () {
+    var open = b.classList.toggle('open');
+    document.querySelectorAll('tr.' + b.dataset.rows).forEach(function (tr) { tr.hidden = !open; });
+  });
+});
+</script>
+{% endblock %}

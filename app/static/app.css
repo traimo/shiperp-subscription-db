@@ -83,3 +83,22 @@ dialog.refresh-dlg { max-width: 760px; }
 .refresh-dlg .changes { max-height: 220px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; margin: 6px 0 10px; }
 .refresh-dlg .changes td { font-size: 12.5px; }
 .delta-up { color: var(--ok); font-weight: 600; } .delta-down { color: var(--err); font-weight: 600; }
+/* Deferred Billing: wide month table, customer column frozen */
+.deferred table { width: auto; }
+.deferred th.fix, .deferred td.fix { position: sticky; left: 0; z-index: 1; background: var(--panel); min-width: 300px; max-width: 360px; box-shadow: 1px 0 0 var(--line); }
+.deferred thead th.fix { z-index: 3; background: #fafbfc; }
+.deferred td.inv { background: var(--accent-soft); }
+.deferred td.cur, .deferred th.cur { border-left: 2px solid var(--accent); }
+.deferred .cur-col { background: #fafcff; }
+.deferred tr.term td { font-size: 12.5px; color: var(--muted); }
+.deferred tr.term td.fix { padding-left: 28px; }
+.deferred tfoot td { position: sticky; bottom: 0; background: #fafbfc; border-top: 2px solid var(--line); }
+.deferred tfoot td.fix { z-index: 2; }
+.deferred .tgl { border: 0; background: none; cursor: pointer; color: var(--muted); padding: 0 4px 0 0; font-size: 12px; }
+.deferred .tgl.open { transform: rotate(90deg); }
+.deferred .muted { color: var(--muted); font-size: 11.5px; margin-left: 4px; }
+.deferred th.mon { text-align: center; border-bottom: 0; }
+.deferred thead tr.h2 th { top: 27px; }
+.deferred th.inv-h, .deferred td.invc { color: var(--muted); border-right: 1px solid var(--line); }
+.deferred td.invc.inv { color: var(--ink); }
+.deferred tfoot td.invc { color: var(--ink); }

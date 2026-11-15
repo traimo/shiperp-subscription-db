@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import or_, select
 
-from . import auth, config, csvsafe, metrics, services
+from . import auth, config, csvsafe, deferred, metrics, services
 from .db import SessionLocal
 from .money import D, D0, ZERO, cents
 from .importer.sheet.rules import HYBRID_CLASS
@@ -265,6 +265,42 @@ def customers_page(request: Request, q: str = "", status: str = "", platform: st
             rows.append((c, cstat, metrics.customer_year_arr(c, t.year, as_of=t)
                          + (0 if platform else metrics.maintenance_arr(c, t.year, t)), plats))
         return render(request, "customers.html", rows=rows, f=dict(q=q, status=status, platform=platform))
+
+
+def _deferred_rows(s, q: str, platform: str, all: str):
+    months, rows, cur = deferred.deferred_table(metrics.load_customers_with_invoices(s), today(), platform)
+    if q:
+        rows = [r for r in rows if q.lower() in r.customer.name.lower() or q in str(r.customer.qb_number)]
+    if not all:
+        rows = [r for r in rows if any(r.balances)]
+    return months, rows, cur
+
+
+@app.get("/deferred-billing.xlsx")
+def deferred_billing_xlsx(q: str = "", platform: str = "", all: str = ""):
+    """The Deferred Billing page as an Excel file (same filters)."""
+    from . import deferred_export
+    with SESSION_FACTORY() as s:
+        months, rows, cur = _deferred_rows(s, q, platform, all)
+        filters = "; ".join(x for x in (f"search '{q}'" if q else "", f"platform {platform}" if platform else "",
+                                        "" if all else "customers with a balance") if x)
+        body = deferred_export.build(months, rows, deferred.column_totals(rows, len(months)),
+                                     deferred.invoiced_totals(rows, len(months)), cur, today(), filters)
+    name = f"Deferred Billing {today():%Y-%m-%d}.xlsx"
+    return StreamingResponse(io.BytesIO(body), headers={"Content-Disposition": f'attachment; filename="{name}"'},
+                             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@app.get("/deferred-billing", response_class=HTMLResponse)
+def deferred_billing_page(request: Request, q: str = "", platform: str = "", all: str = ""):
+    """Each customer's remaining deferred billing (TCV not yet invoiced) at every month-end."""
+    with SESSION_FACTORY() as s:
+        months, rows, cur = _deferred_rows(s, q, platform, all)
+        return render(request, "deferred.html", months=months, rows=rows, current_index=cur,
+                      totals=deferred.column_totals(rows, len(months)),
+                      inv_totals=deferred.invoiced_totals(rows, len(months)),
+                      tcv_total=sum((r.tcv for r in rows), ZERO),
+                      f=dict(q=q, platform=platform, all=all))
 
 
 @app.get("/customers/new", response_class=HTMLResponse)

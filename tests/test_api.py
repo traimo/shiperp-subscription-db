@@ -25,7 +25,9 @@ def term_id(Session, ref):
 @pytest.mark.parametrize("url", ["/", "/customers", "/customers?status=CHURNED", "/customers?q=deere",
                                  "/customer/80072", "/customer/80197", "/customer/80168", "/customer/80148",
                                  "/customers/new", "/wf/new", "/wf/convert?customer=80008", "/import",
-                                 "/import?show=all", "/audit", "/export/arr.csv"])
+                                 "/import?show=all", "/audit", "/export/arr.csv",
+                                 "/deferred-billing", "/deferred-billing?all=1",
+                                 "/deferred-billing?platform=CLOUD&q=nazdar"])
 def test_pages(client, url):
     r = client.get(url)
     assert r.status_code == 200, r.text[:400]

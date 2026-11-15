@@ -128,6 +128,13 @@ def load_customers(session: Session) -> list[Customer]:
     return list(session.scalars(_customer_query().order_by(Customer.qb_number)))
 
 
+def load_customers_with_invoices(session: Session) -> list[Customer]:
+    """load_customers plus each term's invoices (the Deferred Billing page)."""
+    q = _customer_query().options(
+        selectinload(Customer.subscriptions).selectinload(Subscription.terms).selectinload(Term.invoices))
+    return list(session.scalars(q.order_by(Customer.qb_number)))
+
+
 def load_customer(session: Session, qb: int) -> Customer | None:
     """One customer, loaded like load_customers."""
     return session.scalar(_customer_query().where(Customer.qb_number == qb))

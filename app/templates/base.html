@@ -20,6 +20,7 @@
     <a href="/audit" class="{{ 'active' if p.startswith('/audit') }}">Audit log</a>
     <a href="/db" class="{{ 'active' if p.startswith('/db') }}">Database</a>
     <a href="/export/arr.csv">Export ARR (CSV)</a>
+    <a href="/deferred-billing" class="{{ 'active' if p.startswith('/deferred') }}">Deferred Billing</a>
   </nav>
   <button type="button" class="btn primary refresh-btn" id="refresh-open" title="Pull the latest workbooks from SharePoint and re-import them">Refresh data</button>
   {% set _user = request.session.get('user') if 'session' in request.scope else None %}
