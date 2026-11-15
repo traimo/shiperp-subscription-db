@@ -183,13 +183,13 @@ def test_overdue_cleared_by_termination(blank):
         assert metrics.renewals_due(cs, D(2027, 2, 15), 120) == []
 
 
-def test_reimport_refused_when_app_changes_exist(tmp_path):
-    from app.db import Base, make_engine
+def test_reimport_refused_when_app_changes_exist(tmp_path, new_schema):
+    from app.db import Base
     from app.importer.cli import ImportRefused, run_import
     from app.models import AuditLog
     import datetime as dt
-    url = f"sqlite:///{(tmp_path / 'x.db').as_posix()}"
-    eng = make_engine(url)
+    eng = new_schema()
+    url = eng.url.render_as_string(hide_password=False)
     Base.metadata.create_all(eng)
     with eng.begin() as conn:
         conn.execute(AuditLog.__table__.insert().values(at=dt.datetime.now(), actor="t", action="renew",

@@ -13,7 +13,7 @@ from pathlib import Path
 import openpyxl
 from openpyxl.utils import get_column_letter
 
-from .headers import classify, norm
+from .headers import HeaderIssues, classify, norm
 from .model import ContractRow, Section, Tab, Workbook, YearBlock
 
 SECTION_RE = re.compile(r"^\s*([A-E])\.\s+(.+)$")
@@ -81,13 +81,14 @@ def read_tab(key: str, ws_f, ws_v) -> Tab:
         header_row = next((x for x in range(r + 1, end + 1) if norm(F[x][1]).startswith("counter")), master_row)
         raw_headers = {c: (F[header_row][c] if F[header_row][c] is not None else master_headers.get(c))
                        for c in range(1, max_col + 1)}
-        sec_map = classify(raw_headers)
+        issues = HeaderIssues()
+        sec_map = classify(raw_headers, issues)
         colmap = dict(master)
         # Drop master year keys that the section relabels to a different column
         colmap.update(sec_map)
         header_text = {k: str(F[header_row][c] if F[header_row][c] is not None else master_headers.get(c) or "")
                        for k, c in colmap.items()}
-        sec = Section(letter, title_text, r, header_row, end, colmap, header_text)
+        sec = Section(letter, title_text, r, header_row, end, colmap, header_text, issues=issues)
 
         prev_end = header_row
         for x in range(header_row + 1, end + 1):

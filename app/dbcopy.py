@@ -1,9 +1,5 @@
-"""Copy the whole database from one engine to another (SQLite <-> PostgreSQL), table by table.
-
-Used for
-- the one-off move of the SQLite data into PostgreSQL (scripts/sqlite_to_postgres.py), and
-- Refresh / import backups when the app runs on PostgreSQL: the live data is copied into a SQLite file, so the
-  backup stays one file and reapply reads it exactly like a SQLite backup.
+"""Copy every app table from one engine to another, table by table - in practice from one PostgreSQL schema to
+another: Refresh / import backups (live -> backup_YYYYMMDD_HHMMSS, app/backups.py), restoring a backup, and the tests.
 
 The destination is rebuilt first (drop + Alembic migrations to head), so both sides have the same schema. Rows are
 read and written through the app's table definitions, so money stays Decimal and dates stay dates.
@@ -81,8 +77,6 @@ def copy_engines(src_engine, dst_engine) -> list[TableCount]:
                     dst.execute(text("SET LOCAL session_replication_role = replica"))
             except DBAPIError:
                 pass
-        elif dst.dialect.name == "sqlite":
-            dst.exec_driver_sql("PRAGMA defer_foreign_keys = ON")              # checked at commit instead
         for table in Base.metadata.sorted_tables:
             n_src = src.execute(select(func.count()).select_from(table)).scalar() or 0
             result = src.execute(select(table).order_by(*table.primary_key.columns)).mappings()

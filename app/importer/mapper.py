@@ -72,6 +72,7 @@ class ImportReport:
     maintenance_revenue: dict = field(default_factory=dict)  # year -> [sheet rev, db rev, sheet deferred, db deferred]
     maintenance_invoices: dict = field(default_factory=dict)
     maintenance_only: bool = False
+    new_columns: list[str] = field(default_factory=list)    # headers in the workbooks the import does not read
 
     def add(self, severity, c: ContractRow | None, message, customer=None, where=None):
         self.notes.append(Note(severity, where or (ref(c) if c else ""),

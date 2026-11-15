@@ -9,8 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
-from app import config, document_services as docs, main, reapply as rp, refresh, services, sharepoint, undo
-from app.db import make_engine
+from app import backups, config, document_services as docs, main, reapply as rp, refresh, services, sharepoint, undo
 from app.models import AuditLog, ContractDocument, Customer, Subscription, Term, TermKind, TerminationReason
 from app.models import OpenedVia, Platform
 from app.services import TermInput
@@ -21,14 +20,9 @@ SP = "https://erpis.sharepoint.com/sites/Finance/Shared%20Documents/Contracts/X.
 
 
 @pytest.fixture
-def env(imported, tmp_path):
+def env(imported_copy, tmp_path):
     """Private copy of the imported DB + a private source / backups / reports folder."""
-    Session, _ = imported
-    src = Session.kw["bind"].url.database
-    Session.kw["bind"].dispose()
-    dst = tmp_path / "refresh.db"
-    shutil.copy(src, dst)
-    eng = make_engine(f"sqlite:///{dst.as_posix()}")
+    eng = imported_copy()
     S = sessionmaker(bind=eng, expire_on_commit=False)
     source = tmp_path / "source"
     source.mkdir()
@@ -97,11 +91,11 @@ def test_refresh_without_reapply_matches_workbook_and_keeps_backup(env, imported
         assert len(s.scalars(select(Term.id)).all()) == imported[1].db_counts["terms"]
         assert s.scalars(select(AuditLog)).all() == []
         assert s.scalar(select(ContractDocument).where(ContractDocument.url == SP)) is not None   # links survive
-    assert Path(r["backup"]).exists() and Path(r["archive"]).exists()
+    assert r["backup"].startswith("backup_") and backups.exists(r["backup"]) and Path(r["archive"]).exists()
     assert r["pending"] == n0 + 8 and r["items"] == []
     archived = json.loads(Path(r["archive"]).read_text(encoding="utf-8"))
     assert any("89990" in a["summary"] for a in archived)
-    old = make_engine(f"sqlite:///{Path(r['backup']).as_posix()}")     # the backup still has the changes
+    old = backups.engine_for(r["backup"])                                 # the backup still has the changes
     with sessionmaker(bind=old)() as s:
         assert s.scalar(select(Customer).where(Customer.qb_number == 89990)) is not None
     old.dispose()
@@ -241,7 +235,7 @@ def test_dialog_defaults_to_do_not_reapply(env, monkeypatch):
     assert 'name="reapply" value="no" checked' in html
     assert 'value="yes" checked' not in html
     assert f"{n0 + 8} changes made in the app since the last import" in html
-    assert 'name="source" value="local" checked' in html and "not set up" in html
+    assert 'name="source" value="upload" checked' in html and "not set up" in html   # no SharePoint: upload
 
 
 @needs_source

@@ -19,13 +19,8 @@ SP = "https://erpis.sharepoint.com/sites/Finance/Shared%20Documents/Contracts/X.
 
 
 @pytest.fixture
-def app_db(imported, tmp_path):
-    Session, _ = imported
-    src = Session.kw["bind"].url.database
-    Session.kw["bind"].dispose()
-    dst = tmp_path / "char.db"
-    shutil.copy(src, dst)
-    eng = make_engine(f"sqlite:///{dst.as_posix()}")
+def app_db(imported_copy, tmp_path):
+    eng = imported_copy()
     S = sessionmaker(bind=eng, expire_on_commit=False)
     old = main.SESSION_FACTORY, main.TODAY
     main.SESSION_FACTORY, main.TODAY = S, TODAY

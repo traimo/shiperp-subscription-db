@@ -5,7 +5,7 @@ import shutil
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select, text
+from sqlalchemy import inspect, select, text
 from sqlalchemy.orm import sessionmaker
 
 from app import document_services as docs
@@ -21,14 +21,9 @@ SP = "https://erpis.sharepoint.com/sites/Finance/Shared%20Documents/Contracts/X.
 
 
 @pytest.fixture
-def db(imported, tmp_path):
+def db(imported_copy, tmp_path):
     """A private copy of the imported database (undo tests write to it)."""
-    Session, _ = imported
-    src = Session.kw["bind"].url.database
-    Session.kw["bind"].dispose()
-    dst = tmp_path / "undo.db"
-    shutil.copy(src, dst)
-    eng = make_engine(f"sqlite:///{dst.as_posix()}")
+    eng = imported_copy()
     S = sessionmaker(bind=eng, expire_on_commit=False)
     old = main.SESSION_FACTORY, main.TODAY
     main.SESSION_FACTORY, main.TODAY = S, TODAY
@@ -197,11 +192,10 @@ def test_migration_0009_down_and_up(db):
     cfg.set_main_option("script_location", str(config.PROJECT_DIR / "alembic"))
     cfg.attributes["engine"] = eng
     command.downgrade(cfg, "0008")
-    with eng.connect() as conn:
-        assert "change_record" not in [r[0] for r in conn.execute(text("SELECT name FROM sqlite_master"))]
+    assert "change_record" not in inspect(eng).get_table_names()
     command.upgrade(cfg, "head")
     with eng.connect() as conn:
         assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0010"
-        assert "termination_term" in [r[0] for r in conn.execute(text("SELECT name FROM sqlite_master"))]
-        cols = [r[1] for r in conn.execute(text("PRAGMA table_info(audit_log)"))]
-        assert {"undone_at", "undone_by", "undo_of_id"} <= set(cols)
+    assert "termination_term" in inspect(eng).get_table_names()
+    cols = {c["name"] for c in inspect(eng).get_columns("audit_log")}
+    assert {"undone_at", "undone_by", "undo_of_id"} <= cols

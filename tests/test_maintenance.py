@@ -186,16 +186,12 @@ def test_set_fee_blank_zero_and_invoice(mdb):
 # ------------------------------------------------------------------------------------------------ reload safety
 
 @needs_source
-def test_maintenance_only_reload_keeps_subscriptions(imported, tmp_path):
+def test_maintenance_only_reload_keeps_subscriptions(imported_copy, tmp_path):
     from app.importer.cli import ImportRefused, run_maintenance_import
-    Session, _ = imported
-    src = Session.kw["bind"].url.database
-    copy = tmp_path / "copy.db"
-    shutil.copy(src, copy)
-    url = f"sqlite:///{copy.as_posix()}"
-    from app.db import make_engine
     from sqlalchemy.orm import sessionmaker
-    S = sessionmaker(bind=make_engine(url))
+    eng = imported_copy()
+    url = eng.url.render_as_string(hide_password=False)
+    S = sessionmaker(bind=eng)
     with S() as s:
         s.add(AuditLog(at=dt.datetime.now(), actor="t", action="renew", entity="term", summary="user change"))
         s.commit()

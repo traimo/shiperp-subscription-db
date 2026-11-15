@@ -19,13 +19,8 @@ EVIL_NAME = "x');alert(1);('"
 
 
 @pytest.fixture
-def app_db(imported, tmp_path):
-    Session, _ = imported
-    src = Session.kw["bind"].url.database
-    Session.kw["bind"].dispose()
-    dst = tmp_path / "sec.db"
-    shutil.copy(src, dst)
-    eng = make_engine(f"sqlite:///{dst.as_posix()}")
+def app_db(imported_copy, tmp_path):
+    eng = imported_copy()
     S = sessionmaker(bind=eng, expire_on_commit=False)
     old = main.SESSION_FACTORY, main.TODAY
     main.SESSION_FACTORY, main.TODAY = S, TODAY
@@ -171,15 +166,19 @@ def test_broken_workbook_leaves_the_database_alone(app_db, tmp_path):
         assert s.scalar(select(Term.id).limit(1)) is not None                # nothing was dropped
 
 
-def test_backup_database(tmp_path, monkeypatch):
-    db = tmp_path / "x.db"
-    import sqlite3
-    sqlite3.connect(db).execute("create table t (a)").connection.commit()
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db.as_posix()}")
-    monkeypatch.setattr(cli.config, "DATA_DIR", tmp_path)
-    out = cli.backup_database("import")
-    assert out.exists() and out.name.startswith("subscriptions-before-import-")
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'missing.db').as_posix()}")
+def test_backup_database(imported_copy, new_schema, monkeypatch):
+    from app import backups
+    from app.db import drop_schema
+    eng = imported_copy()
+    monkeypatch.setenv("DATABASE_URL", eng.url.render_as_string(hide_password=False))
+    name = cli.backup_database("import")
+    try:
+        assert name.startswith("backup_") and backups.exists(name)
+        assert any(b.name == name and b.label == "before import" for b in backups.list_all())
+    finally:
+        drop_schema(None, name)
+    empty = new_schema()                                              # nothing imported yet: nothing to back up
+    monkeypatch.setenv("DATABASE_URL", empty.url.render_as_string(hide_password=False))
     assert cli.backup_database("import") is None
 
 

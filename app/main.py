@@ -542,8 +542,13 @@ def refresh_dialog(request: Request):
     with SESSION_FACTORY() as s:
         changes = [(a, reapply.classify(a)) for a in reapply.pending_changes(s)]
     check_msg, check_blocking = check_status()
+    from . import refresh
+    try:
+        local_files = {k: p.name for k, p in refresh.local_sources(refresh.PATHS.source).items()}
+    except refresh.RefreshError:
+        local_files = {}
     return templates.TemplateResponse(request, "_refresh_dialog.html", dict(
-        files=files, sp_error=sp_error, imported=imported, changes=changes, check_msg=check_msg,
+        files=files, sp_error=sp_error, imported=imported, changes=changes, check_msg=check_msg, local_files=local_files,
         check_blocking=check_blocking, n_can=sum(1 for _, k in changes if k == "can")))
 
 
@@ -551,14 +556,33 @@ def refresh_dialog(request: Request):
 async def refresh_submit(request: Request):
     from starlette.concurrency import run_in_threadpool
     from . import refresh, sharepoint
+    import tempfile
     form = await request.form()
     reapply_changes = form.get("reapply") == "yes"            # default: do not reapply
-    from_sharepoint = form.get("source", "sharepoint") != "local"
-    try:
-        await run_in_threadpool(refresh.run, SESSION_FACTORY, actor(), today(), reapply=reapply_changes,
-                                pull_from_sharepoint=from_sharepoint)
-    except (refresh.RefreshError, sharepoint.SharePointError) as e:
-        return redirect("/refresh/result", error=str(e)[:400])
+    source = form.get("source", "sharepoint")
+    with tempfile.TemporaryDirectory() as tmp:
+        uploads = None
+        if source == "upload":                                # browser upload: saved to a temp folder, checked
+            uploads = {}                                      # and swapped in by refresh.run
+            for key in ("subscription", "maintenance"):
+                f = form.get(f"{key}_file")
+                if f is None or isinstance(f, str) or not f.filename:
+                    continue
+                p = Path(tmp) / f"{key}.upload"
+                with p.open("wb") as out:
+                    while chunk := await f.read(1024 * 1024):
+                        out.write(chunk)
+                        if out.tell() > refresh.MAX_UPLOAD:
+                            return redirect("/refresh/result", error=f"'{f.filename}' is larger than "
+                                                                     f"{refresh.MAX_UPLOAD // (1024 * 1024)} MB.")
+                uploads[key] = (f.filename, p)
+            if "subscription" not in uploads:
+                return redirect("/refresh/result", error="Choose the Subscription Summary workbook to upload.")
+        try:
+            await run_in_threadpool(refresh.run, SESSION_FACTORY, actor(), today(), reapply=reapply_changes,
+                                    pull_from_sharepoint=source == "sharepoint", uploads=uploads)
+        except (refresh.RefreshError, sharepoint.SharePointError) as e:
+            return redirect("/refresh/result", error=str(e)[:1500])
     return redirect("/refresh/result", done=1)
 
 
@@ -788,10 +812,13 @@ from . import dbviewer  # noqa: E402
 
 @app.get("/db", response_class=HTMLResponse)
 def db_index(request: Request):
+    from . import backups
     with SESSION_FACTORY() as s:
         infos = dbviewer.all_tables(s)
+        size = dbviewer.database_size(s)
+        found = backups.list_all(s.get_bind())
         return render(request, "db_index.html", infos=infos, svg=dbviewer.diagram_svg(infos),
-                      db_url=config.database_url())
+                      db_label=config.database_label(), db_size=size, backups=found, keep=backups.KEEP)
 
 
 @app.get("/db/{table}", response_class=HTMLResponse)

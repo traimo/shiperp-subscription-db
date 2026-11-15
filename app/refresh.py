@@ -3,7 +3,8 @@
 Steps (see README "Refresh data"):
 1. download both workbooks (read-only Graph) to a temp folder, check them, then swap them into data/source
    (the previous copies go to data/backups/source-<stamp>/); with pull=False the files already in data/source are used
-2. back up the database (data/backups/subscriptions-before-refresh-<stamp>.db; a SQLite file also on PostgreSQL) and archive its change list (.json)
+2. back up the database into a backup schema (backup_YYYYMMDD_HHMMSS, app/backups.py; newest 10 kept) and archive its
+   change list (data/backups/audit-before-refresh-<stamp>.json)
 3. company ARR / CARR before
 4. re-import (drops every table, including the audit log)
 5. reapply the backup's pending changes (only when asked)
@@ -14,7 +15,6 @@ from __future__ import annotations
 import datetime as dt
 import json
 import shutil
-import sqlite3
 import tempfile
 import threading
 from dataclasses import dataclass, field
@@ -23,11 +23,12 @@ from pathlib import Path
 from sqlalchemy.orm import sessionmaker
 
 from . import config, metrics, reapply as rp, sharepoint
-from .db import make_engine
+
 from .money import cents
 
 PATTERNS = {"subscription": "*Subscription Summary*.xlsx", "maintenance": "*Maintenance*.xlsx"}
 RESULT_FILE = "latest-refresh.json"
+MAX_UPLOAD = 25 * 1024 * 1024          # bytes per uploaded workbook
 _LOCK = threading.Lock()
 
 
@@ -65,9 +66,52 @@ def local_sources(source_dir: Path) -> dict[str, Path]:
 
 # ------------------------------------------------------------------------------------------------ steps
 
-def _check_workbook(key: str, path: Path, name: str) -> None:
+def _swap_in(got: dict[str, Path], paths: Paths, stamp: str) -> None:
+    """Put checked workbooks into the source folder; the copies they replace go to backups/source-<stamp>/."""
+    paths.source.mkdir(parents=True, exist_ok=True)
+    keep = paths.backups / f"source-{stamp}"
+    for key, p in got.items():
+        for prev in [q for q in paths.source.glob(PATTERNS[key]) if not q.name.startswith("~$")]:
+            keep.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(prev), keep / prev.name)
+        shutil.copy2(p, paths.source / p.name)
+
+
+def safe_upload_name(name: str) -> str:
+    """The browser-sent file name, reduced to a plain .xlsx file name (no folders)."""
+    base = Path(str(name or "").replace("\\", "/")).name.strip()
+    if not base or base.startswith((".", "~$")) or not base.lower().endswith(".xlsx") or any(c in base for c in '<>:"|?*'):
+        raise RefreshError(f"'{name}' is not an .xlsx workbook name.")
+    return base
+
+
+def accept_uploads(paths: Paths, stamp: str, uploads: dict[str, tuple[str, Path]]) -> list[dict]:
+    """uploads: {key: (file name as uploaded, temp file)}. Checks every file, then swaps them into the source
+    folder. Nothing changes unless all are good. A workbook that is not uploaded keeps its current copy."""
+    if "subscription" not in uploads:
+        raise RefreshError("Choose the Subscription Summary workbook to upload.")
+    with tempfile.TemporaryDirectory() as tmp:
+        got = {}
+        for key, (name, src) in uploads.items():
+            name = safe_upload_name(name)
+            size = src.stat().st_size
+            if size == 0:
+                raise RefreshError(f"'{name}' is empty.")
+            if size > MAX_UPLOAD:
+                raise RefreshError(f"'{name}' is larger than {MAX_UPLOAD // (1024 * 1024)} MB.")
+            p = Path(tmp) / name
+            shutil.copyfile(src, p)
+            _check_workbook(key, p, name, where="uploaded")
+            got[key] = p
+        _swap_in(got, paths, stamp)
+        now = dt.datetime.now().isoformat(timespec="minutes")
+        return [{"key": k, "name": p.name, "size": p.stat().st_size, "modified_by": "uploaded", "modified": now}
+                for k, p in got.items()]
+
+
+def _check_workbook(key: str, path: Path, name: str, where: str = "SharePoint") -> None:
     if not Path(name).match(PATTERNS[key]):
-        raise RefreshError(f"The SharePoint file '{name}' does not look like the {key} workbook "
+        raise RefreshError(f"The {where} file '{name}' does not look like the {key} workbook "
                            f"(expected a name like {PATTERNS[key]}).")
     try:
         from openpyxl import load_workbook
@@ -88,43 +132,15 @@ def pull(paths: Paths, stamp: str, client=None) -> list[dict]:
             p = client.download(f, Path(tmp) / f.name)
             _check_workbook(key, p, f.name)
             got[key] = p
-        old = local_sources(paths.source) if any(paths.source.glob("*.xlsx")) else {}
-        keep = paths.backups / f"source-{stamp}"
-        for key, p in got.items():
-            if key in old:
-                keep.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(old[key]), keep / old[key].name)
-            paths.source.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(p, paths.source / p.name)
+        _swap_in(got, paths, stamp)
     return [{"key": f.key, "name": f.name, "size": f.size, "modified_by": f.modified_by,
              "modified": f.modified.isoformat(timespec="minutes") if f.modified else None} for f in files.values()]
 
 
-def backup_db(engine, paths: Paths, stamp: str) -> Path:
-    """Copy the live database to data/backups/subscriptions-before-refresh-<stamp>.db. Always a SQLite file:
-    from SQLite with the SQLite backup API, from PostgreSQL table by table (app/dbcopy.py), so reapply reads
-    either kind the same way."""
-    paths.backups.mkdir(parents=True, exist_ok=True)
-    dst = paths.backups / f"subscriptions-before-refresh-{stamp}.db"
-    if engine.url.get_backend_name() == "sqlite":
-        src = sqlite3.connect(engine.url.database)
-        out = sqlite3.connect(dst)
-        try:
-            src.backup(out)                                 # consistent copy even while the app is connected
-        finally:
-            out.close()
-            src.close()
-        return dst
-    from .dbcopy import copy_engines
-    out_engine = make_engine(f"sqlite:///{dst.as_posix()}")
-    try:
-        copy_engines(engine, out_engine)
-    except Exception:
-        out_engine.dispose()
-        dst.unlink(missing_ok=True)
-        raise
-    out_engine.dispose()
-    return dst
+def backup_db(engine, actor: str = "") -> str:
+    """Copy the live database into a new backup schema (app/backups.py); returns the schema name."""
+    from . import backups
+    return backups.make(engine, f"before refresh{f' by {actor}' if actor else ''}")
 
 
 def archive_changes(factory, paths: Paths, stamp: str) -> tuple[Path, int]:
@@ -137,6 +153,7 @@ def archive_changes(factory, paths: Paths, stamp: str) -> tuple[Path, int]:
                  "detail": a.detail, "undone_at": a.undone_at.isoformat(timespec="seconds") if a.undone_at else None,
                  "undone_by": a.undone_by, "undo_of_id": a.undo_of_id} for a in rows]
         pending = len(rp.pending_changes(s))
+    paths.backups.mkdir(parents=True, exist_ok=True)
     p = paths.backups / f"audit-before-refresh-{stamp}.json"
     p.write_text(json.dumps(data, indent=1, default=str), encoding="utf-8")
     return p, pending
@@ -160,7 +177,7 @@ def figures(factory, today: dt.date) -> dict:
 # ------------------------------------------------------------------------------------------------ run
 
 def run(factory, actor: str, today: dt.date, reapply: bool = False, pull_from_sharepoint: bool = True,
-        paths: Paths | None = None, client=None) -> dict:
+        paths: Paths | None = None, client=None, uploads: dict[str, tuple[str, Path]] | None = None) -> dict:
     """The whole refresh. Returns (and saves) the result dict. Raises RefreshError before anything was changed
     when the download or a check fails."""
     paths = paths or PATHS
@@ -169,38 +186,46 @@ def run(factory, actor: str, today: dt.date, reapply: bool = False, pull_from_sh
     try:
         engine = factory.kw["bind"]
         url = engine.url
-        if url.get_backend_name() == "sqlite" and (not url.database or url.database == ":memory:"):
-            raise RefreshError("Refresh data needs a database file or server (backup + reapply use a copy).")
         started = dt.datetime.now()
         stamp = started.strftime("%Y%m%d-%H%M%S")
         result = {"started": started.isoformat(timespec="seconds"), "actor": actor, "reapply": reapply,
                   "pulled": pull_from_sharepoint, "files": [], "items": []}
 
-        if pull_from_sharepoint:
+        if uploads:
+            pull_from_sharepoint = False
+            result["pulled"], result["uploaded"] = False, True
+            result["files"] = accept_uploads(paths, stamp, uploads)   # raises before anything changed
+        elif pull_from_sharepoint:
             result["files"] = pull(paths, stamp, client)    # raises before anything changed
         srcs = local_sources(paths.source)
-        if not pull_from_sharepoint:
+        if not pull_from_sharepoint and not uploads:
             result["files"] = [{"key": k, "name": p.name, "size": p.stat().st_size, "modified_by": "",
                                 "modified": dt.datetime.fromtimestamp(p.stat().st_mtime).isoformat(timespec="minutes")}
                                for k, p in srcs.items()]
 
         result["before"] = figures(factory, today)
-        backup = backup_db(engine, paths, stamp)
+        backup = backup_db(engine, actor)
         archive, pending = archive_changes(factory, paths, stamp)
-        result.update(backup=str(backup), archive=str(archive), pending=pending)
+        result.update(backup=backup, archive=str(archive), pending=pending)
 
         engine.dispose()                                    # the import rebuilds the tables on this file
         from .importer.cli import run_import
-        report = run_import(source=srcs["subscription"], maintenance=srcs.get("maintenance", False),
-                            url=url.render_as_string(hide_password=False), today=today, report_dir=paths.reports,
-                            force=True)
+        from .importer.columns import ColumnProblem
+        try:
+            report = run_import(source=srcs["subscription"], maintenance=srcs.get("maintenance", False),
+                                url=url.render_as_string(hide_password=False), today=today,
+                                report_dir=paths.reports, force=True)
+        except ColumnProblem as e:                          # raised before the database is touched
+            raise RefreshError(str(e)) from None
         engine.dispose()
+        result["columns"] = report.new_columns
         result["import"] = {"counts": report.db_counts,
                             "warnings": sum(1 for n in report.notes if n.severity == "warning"),
                             "rejected": sum(1 for n in report.notes if n.severity == "rejected")}
 
         if reapply and pending:
-            old_engine = make_engine(f"sqlite:///{backup.as_posix()}")
+            from . import backups
+            old_engine = backups.engine_for(backup, url.render_as_string(hide_password=False))
             try:
                 items = rp.reapply(sessionmaker(bind=old_engine, expire_on_commit=False), factory, actor, today)
             finally:

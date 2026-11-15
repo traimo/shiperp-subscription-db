@@ -14,8 +14,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
 from .money import ZERO, cents
 
-# Money: exact decimal, 2 places (DECIMAL(14,2) on SQL Server / PostgreSQL; SQLite stores it as REAL and SQLAlchemy
-# rounds it back to 2 places on read). Assignments are converted to Decimal cents by _money_hooks below.
+# Money: exact decimal, 2 places (NUMERIC(14,2) in PostgreSQL). Assignments are converted to Decimal cents by
+# _money_hooks below.
 Money = Numeric(14, 2, asdecimal=True)
 
 

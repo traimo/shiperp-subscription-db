@@ -21,19 +21,10 @@ def run_migrations_offline():
 def run_migrations_online():
     engine = context.config.attributes.get("engine") or make_engine()
     with engine.connect() as conn:
-        sqlite = conn.dialect.name == "sqlite"
-        if sqlite:      # batch mode rebuilds tables; FK checks would block dropping a referenced table
-            conn.exec_driver_sql("PRAGMA foreign_keys=OFF")
-            conn.commit()
+        # render_as_batch stays on: the existing migrations were written in batch style (a no-op on PostgreSQL)
         context.configure(connection=conn, target_metadata=target_metadata, render_as_batch=True)
         with context.begin_transaction():
             context.run_migrations()
-        if sqlite:
-            bad = conn.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
-            conn.exec_driver_sql("PRAGMA foreign_keys=ON")
-            conn.commit()
-            if bad:
-                raise RuntimeError(f"Foreign key check failed after migration: {bad[:5]}")
 
 
 if context.is_offline_mode():

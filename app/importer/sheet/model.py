@@ -77,6 +77,7 @@ class Section:
     header_text: dict[str, str]          # key -> header text as written in this section
     blocks: list[YearBlock] = field(default_factory=list)
     grand_total_row: int | None = None
+    issues: "HeaderIssues | None" = None  # unknown / duplicate headers in this section's header row
 
     def block_for_year(self, year: int) -> YearBlock | None:
         return next((b for b in self.blocks if b.year == year), None)

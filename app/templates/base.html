@@ -22,7 +22,7 @@
     <a href="/export/arr.csv">Export ARR (CSV)</a>
   </nav>
   <button type="button" class="btn primary refresh-btn" id="refresh-open" title="Pull the latest workbooks from SharePoint and re-import them">Refresh data</button>
-  <span class="file">POC 2 · SQLite</span>
+  <span class="file">POC 2 · PostgreSQL</span>
 </header>
 <main>
 {% set _u = request.query_params.get('undo') %}{% if _u and _u.isdigit() %}<div class="alert ok" style="display:flex;gap:12px;align-items:center">Change saved. <a class="btn small" href="/audit/{{ _u }}/undo?back={{ request.url.path|urlencode }}">Undo this change</a></div>{% endif %}

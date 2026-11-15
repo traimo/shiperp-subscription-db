@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+from dataclasses import dataclass, field
 
 YEAR_COL_RE = re.compile(r"^arr\b(?!\s*-\s*annual).*?(20\d\d)\s*$")
 DEFERRED_BILLING_RE = re.compile(r"(\d{1,2})/(\d{1,2})/(20\d\d)\s*-\s*gl#?\s*1215")
@@ -79,7 +80,28 @@ LABELS = {k: lbl for k, lbl, _ in _SIMPLE}
 LABELS.update({"prior_arr": "Previous ARR (helper)", "arr_change": "ARR change at renewal (helper)"})
 
 
-def classify(raw_headers: dict[int, object]) -> dict[str, int]:
+# Contract-area headers that are in the workbook today and deliberately not imported (so they are not reported as new).
+KNOWN_UNUSED = re.compile(r"^(converted/upsell only|net arr from converted|original license - arr|annual uptick|yes$)")
+# Fields where a second matching column is an error (the first one from the left would silently win). Billing groups
+# and the revenue schedule legitimately repeat headers, so they are not checked.
+def is_checked_field(key: str) -> bool:
+    return key in LABELS or bool(re.fullmatch(r"arr_20\d\d", key))
+
+
+REQUIRED_FIELDS = ("customer_number", "customer_name", "period", "arr")
+
+
+@dataclass
+class HeaderIssues:
+    """What classify() could not use cleanly in one header row."""
+    unknown: list[tuple[int, str]] = field(default_factory=list)       # (column, header text) matching no field
+    duplicates: dict[str, list[int]] = field(default_factory=dict)     # field -> columns; the first one is used
+
+    def checked_duplicates(self) -> dict[str, list[int]]:
+        return {k: v for k, v in self.duplicates.items() if is_checked_field(k)}
+
+
+def classify(raw_headers: dict[int, object], issues: HeaderIssues | None = None) -> dict[str, int]:
     """Map canonical keys to 1-based column numbers for one header row.
 
     Keys produced: the simple keys above, prior_arr / arr_change (the two "NOT APPLICABLE" columns),
@@ -87,8 +109,18 @@ def classify(raw_headers: dict[int, object]) -> dict[str, int]:
     rev_month_YYYY_MM (monthly revenue columns), rev_q_YYYY_N, rev_ytd_YYYY.
     Monthly billing layout (2026 on): bill_date_YYYY, bill_amount_YYYY (the "Jan to June" amount),
     bill_month_YYYY_MM (one per month-end column), bill_total_YYYY, deferred_billing_YYYY.
+
+    With `issues`, also records headers that match nothing and fields matched by more than one column (the first
+    one, from the left, is the one used).
     """
     out: dict[str, int] = {}
+
+    def put(key: str, col: int) -> None:
+        if key not in out:
+            out[key] = col
+        elif issues is not None and out[key] != col:
+            issues.duplicates.setdefault(key, [out[key]]).append(col)
+
     na_seen = 0
     pending_billing: list[tuple[str, int]] = []   # Date Invoiced / Amount waiting for their year header
     in_schedule = False
@@ -99,16 +131,16 @@ def classify(raw_headers: dict[int, object]) -> dict[str, int]:
             continue
         if isinstance(raw, (dt.datetime, dt.date)):
             if month_year and not in_schedule:
-                out.setdefault(f"bill_month_{raw.year}_{raw.month:02d}", col)
+                put(f"bill_month_{raw.year}_{raw.month:02d}", col)
                 continue
             if in_schedule:
                 key = f"rev_month_{raw.year}_{raw.month:02d}"
-                out.setdefault(key, col)
+                put(key, col)
             continue
         h = norm(raw)
         if h.startswith("gl#2320 deferred revenue,beg") or h.startswith("gl#2340 deferred revenue,beg"):
             in_schedule = True
-            out.setdefault("rev_deferred_beg", col)
+            put("rev_deferred_beg", col)
             continue
         if not in_schedule and (h == "date invoiced" or h == "amount"):
             pending_billing.append(("bill_date" if h == "date invoiced" else "bill_amount", col))
@@ -119,50 +151,53 @@ def classify(raw_headers: dict[int, object]) -> dict[str, int]:
                 month_year = m.group(3)
                 for kind, c in pending_billing:
                     if kind == "bill_date":
-                        out.setdefault(f"bill_date_{month_year}", c)
+                        put(f"bill_date_{month_year}", c)
                 pending_billing.clear()
-                out.setdefault(f"bill_amount_{month_year}", col)
+                put(f"bill_amount_{month_year}", col)
                 continue
             if month_year and h == "total invoice":
-                out.setdefault(f"bill_total_{month_year}", col)
+                put(f"bill_total_{month_year}", col)
                 continue
             if month_year and UNDATED_DEFERRED_RE.match(h):
-                out.setdefault(f"deferred_billing_{month_year}", col)
+                put(f"deferred_billing_{month_year}", col)
                 month_year = None
                 continue
         m = DEFERRED_BILLING_RE.search(h)
         if m and not in_schedule:
             year = m.group(3)
             for kind, c in pending_billing:
-                out.setdefault(f"{kind}_{year}", c)
+                put(f"{kind}_{year}", c)
             pending_billing.clear()
-            out.setdefault(f"deferred_billing_{year}", col)
+            put(f"deferred_billing_{year}", col)
             continue
         if in_schedule:
             m = QUARTER_RE.match(h)
             if m:
-                out.setdefault(f"rev_q_{m.group(2)}_{m.group(1)}", col)
+                put(f"rev_q_{m.group(2)}_{m.group(1)}", col)
                 continue
             m = YTD_RE.search(h)
             if m:
-                out.setdefault(f"rev_ytd_{m.group(1)}", col)
+                put(f"rev_ytd_{m.group(1)}", col)
                 continue
-            continue
+            continue                                # revenue schedule: many computed columns, none checked
         if _NOT_APPLICABLE.match(h):
             if na_seen < len(HELPER_KEYS):
-                out.setdefault(HELPER_KEYS[na_seen], col)
+                put(HELPER_KEYS[na_seen], col)
             na_seen += 1
             continue
         m = YEAR_COL_RE.match(h)
         if m and not h.startswith("arr - annual"):
-            out.setdefault(f"arr_{m.group(1)}", col)
+            put(f"arr_{m.group(1)}", col)
             continue
         for key, _lbl, pat in _SIMPLE:
             if pat.search(h):
-                out.setdefault(key, col)
+                put(key, col)
                 if key == "review_by_tin":   # last billing column; the revenue schedule follows (Cloud has no "Beg")
                     in_schedule = True
                 break
+        else:
+            if issues is not None and not h.startswith("=") and not KNOWN_UNUSED.match(h):
+                issues.unknown.append((col, str(raw).strip()))
     return out
 
 

@@ -97,32 +97,32 @@ def _alembic(engine, target):
     command.upgrade(cfg, target)
 
 
-def test_migration_0004_converts_existing_float_data(tmp_path):
+def test_migration_0004_converts_existing_float_data(tmp_path, new_schema):
     """A 0003 database holding float amounts (like the real one) upgrades in place: values rounded to the cent,
     rows and foreign keys intact."""
-    engine = make_engine(f"sqlite:///{(tmp_path / 'm.db').as_posix()}")
+    engine = new_schema()
     _alembic(engine, "0003")
     with engine.begin() as conn:
         conn.execute(text("INSERT INTO customer (id, qb_number, name, has_perpetual_license) "
-                          "VALUES (1, 80001, 'X', 0)"))
+                          "VALUES (1, 80001, 'X', FALSE)"))
         conn.execute(text("INSERT INTO subscription (id, customer_id, platform, opened_via) "
                           "VALUES (1, 1, 'ON_PREM', 'NET_NEW')"))
         conn.execute(text("INSERT INTO term (id, subscription_id, kind, start_date, end_date, tcv, term_months, "
-                          "is_revised) VALUES (1, 1, 'INITIAL', '2024-01-01', '2026-12-31', 53820.0, 36.0, 0)"))
+                          "is_revised) VALUES (1, 1, 'INITIAL', '2024-01-01', '2026-12-31', 53820.0, 36.0, FALSE)"))
         conn.execute(text("INSERT INTO invoice (id, term_id, billing_year, amount) VALUES (1, 1, 2024, 17940.0)"))
         conn.execute(text("INSERT INTO maintenance_contract (id, customer_id, block, go_live, calendar_billing, "
-                          "converted) VALUES (1, 1, 'PERPETUAL_LIVE', 1, 0, 0)"))
+                          "converted) VALUES (1, 1, 'PERPETUAL_LIVE', TRUE, FALSE, FALSE)"))
         conn.execute(text("INSERT INTO license_purchase (id, contract_id, kind, amount, maintenance_amount) "
                           "VALUES (1, 1, 'ORIGINAL', 50000.0, 8333.33333333333)"))
         conn.execute(text("INSERT INTO maintenance_fee (id, contract_id, year, amount, prorated, source) "
-                          "VALUES (1, 1, 2026, 52934.35, 0, 'IMPORT')"))
+                          "VALUES (1, 1, 2026, 52934.35, FALSE, 'IMPORT')"))
     _alembic(engine, "0004")
     with engine.connect() as conn:
         assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0004"
-        types = {r[1]: r[2] for r in conn.execute(text("PRAGMA table_info(term)"))}
-        assert types["tcv"].upper().startswith("NUMERIC") and types["term_months"].upper() == "FLOAT"
-        assert conn.execute(text("PRAGMA foreign_key_check")).fetchall() == []
-        assert conn.execute(text("PRAGMA foreign_keys")).scalar() == 1
+        types = {r[0]: r[1] for r in conn.execute(text(
+            "SELECT column_name, data_type FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = 'term'"))}
+        assert types["tcv"] == "numeric" and types["term_months"] in ("double precision", "real")
     S = sessionmaker(bind=engine)
     with S() as s:
         mc = s.get(MaintenanceContract, 1)

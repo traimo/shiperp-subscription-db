@@ -60,7 +60,7 @@ def _load(col, v):
 
 
 def _norm(row: dict | None) -> dict | None:
-    """Comparable form: Decimals compared as numbers rounded to cents (SQLite stores NUMERIC as REAL)."""
+    """Comparable form: Decimals compared as numbers rounded to cents (values read back from JSON may carry more places)."""
     if row is None:
         return None
     out = {}
@@ -231,8 +231,6 @@ def undo_change(s: Session, actor: str, audit_id: int):
     a = check(s, audit_id)
     lines = [f"Undid: {a.summary}"] + describe(a)
     conn = s.connection()
-    if conn.dialect.name == "sqlite":                     # check foreign keys at commit, after every row is back
-        conn.exec_driver_sql("PRAGMA defer_foreign_keys = ON")
     for r in sorted(a.changes, key=lambda x: x.seq, reverse=True):
         table = _table(r.table_name)
         if r.op == "insert":

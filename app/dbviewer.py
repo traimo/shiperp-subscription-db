@@ -112,6 +112,12 @@ def all_tables(session: Session) -> list[TableInfo]:
     return [table_info(session, n) for n in table_names()]
 
 
+def database_size(session: Session) -> int:
+    """Bytes used by the whole database (live tables and backups)."""
+    from sqlalchemy import text
+    return int(session.execute(text("SELECT pg_database_size(current_database())")).scalar() or 0)
+
+
 @dataclass
 class RowPage:
     rows: list[dict]

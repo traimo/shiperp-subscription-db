@@ -23,11 +23,11 @@ PDF = b"%PDF-1.4\n%%EOF\n"
 
 
 @pytest.fixture
-def db(tmp_path, monkeypatch):
+def db(tmp_path, monkeypatch, new_schema):
     monkeypatch.delenv("SP_ALLOWED_HOSTS", raising=False)
-    url = f"sqlite:///{(tmp_path / 'docs.db').as_posix()}"
+    engine = new_schema()
+    url = engine.url.render_as_string(hide_password=False)
     run_import(url=url, today=TODAY, report_dir=tmp_path)
-    engine = make_engine(url)
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     old = main.SESSION_FACTORY, main.TODAY
     main.SESSION_FACTORY, main.TODAY = Session, TODAY

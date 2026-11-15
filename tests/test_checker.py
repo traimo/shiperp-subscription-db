@@ -122,7 +122,7 @@ def _sha(p):
 def real_check(tmp_path_factory):
     if not config.source_workbook() or not list(config.SOURCE_DIR.glob("*Subscription Summary*.xlsx")):
         pytest.skip("no workbook in data/source")
-    watched = [config.DATA_DIR / "subscriptions.db", config.REPORT_DIR / "latest-import.json",
+    watched = [config.REPORT_DIR / "latest-import.json",
                config.source_workbook(), config.maintenance_workbook()]
     before = {p: _sha(p) for p in watched if p}
     out = tmp_path_factory.mktemp("check")

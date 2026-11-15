@@ -1,8 +1,10 @@
-"""Findings that need the importer: run the normal import into a throwaway SQLite file in a temp folder (the real
-database and data/reports are never touched), then turn its notes and the ARR reconciliation into cell issues."""
+"""Findings that need the importer: run the normal import into a throwaway PostgreSQL schema (sheetcheck_<pid>,
+dropped afterwards; the live tables and data/reports are never touched), then turn its notes and the ARR
+reconciliation into cell issues."""
 from __future__ import annotations
 
 import datetime as dt
+import os
 import re
 import tempfile
 from pathlib import Path
@@ -26,15 +28,25 @@ COLUMN_HINTS = [(r"(?i)period", "period"), (r"(?i)term in yrs", "term_years"), (
 
 
 def run_temp_import(subscription: Path, maintenance: Path | None):
+    from ..db import drop_schema
     from ..importer.cli import run_import
     tmp = Path(tempfile.mkdtemp(prefix="sheetcheck-"))
-    rep = run_import(subscription, url=f"sqlite:///{(tmp / 'check.db').as_posix()}", today=dt.date.today(),
-                     report_dir=tmp, maintenance=maintenance if maintenance else False, force=True)
+    schema = f"sheetcheck_{os.getpid()}"
+    try:
+        rep = run_import(subscription, schema=schema, today=dt.date.today(), report_dir=tmp,
+                         maintenance=maintenance if maintenance else False, force=True)
+    finally:
+        drop_schema(None, schema)
     return rep, tmp
 
 
 def check(subscription: Path, maintenance: Path | None, wb: Workbook, ms: m.MaintenanceSheet | None) -> list[Issue]:
-    rep, tmp = run_temp_import(subscription, maintenance)
+    from ..importer.columns import ColumnProblem
+    try:
+        rep, tmp = run_temp_import(subscription, maintenance)
+    except ColumnProblem as e:                        # columns renamed / duplicated: nothing else can be checked
+        return [Issue(SEVERITY_RULE.get("rejected", "I1"), "subscription", "", None, None, line.lstrip("- "))
+                for line in str(e).splitlines()[1:]]
     out: list[Issue] = []
     try:
         for n in rep.notes:

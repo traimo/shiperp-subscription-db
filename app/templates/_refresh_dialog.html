@@ -1,19 +1,24 @@
-<form method="post" action="/refresh">
+<form method="post" action="/refresh" enctype="multipart/form-data">
 <h2>Refresh data from the workbooks</h2>
-<p class="sub" style="margin-bottom:10px">Pulls the latest workbooks from SharePoint (read-only), re-imports them and shows how the numbers changed. The database is backed up first.</p>
+<p class="sub" style="margin-bottom:10px">Re-imports the two workbooks into the database and shows how the numbers changed. The database is backed up first.</p>
 
-{% if sp_error %}
-<div class="alert warn">{{ sp_error }}</div>
-<label class="choice"><input type="radio" name="source" value="local" checked> Use the files already in <span class="mono">data\source</span></label>
-{% else %}
-<input type="hidden" name="source" value="sharepoint">
-<table style="margin-bottom:10px">
+<p style="margin:8px 0 2px;font-weight:600">Which workbooks?</p>
+{% if not sp_error %}
+<label class="choice"><input type="radio" name="source" value="sharepoint" checked> Pull the latest from SharePoint (read-only)</label>
+<table style="margin:0 0 8px 24px">
   <tr><th>Workbook on SharePoint</th><th>Last modified</th><th></th></tr>
   {% for f in files %}<tr><td>{{ f.name }}</td>
     <td style="white-space:nowrap">{{ f.modified.strftime('%m/%d/%Y %H:%M') if f.modified else '' }}{% if f.modified_by %} by {{ f.modified_by }}{% endif %}</td>
     <td>{% if imported and f.modified %}{% if f.modified > imported %}<span class="badge b-warning">changed since last import</span>{% else %}<span class="badge b-muted">unchanged</span>{% endif %}{% endif %}</td></tr>{% endfor %}
 </table>
 {% endif %}
+<label class="choice"><input type="radio" name="source" value="upload"{% if sp_error %} checked{% endif %}> Upload the workbooks from this computer</label>
+<div style="margin:2px 0 8px 24px;display:grid;gap:6px">
+  <label>Subscription Summary workbook (.xlsx, required)<br><input type="file" name="subscription_file" accept=".xlsx"></label>
+  <label>Maintenance workbook (.xlsx, optional - leave empty to keep {{ local_files.get('maintenance') or 'the current one' }})<br><input type="file" name="maintenance_file" accept=".xlsx"></label>
+</div>
+<label class="choice"><input type="radio" name="source" value="local"{% if not local_files %} disabled{% endif %}> Re-import the workbooks already in the app{% if local_files %} ({{ local_files.values()|join(', ') }}){% else %} (none yet){% endif %}</label>
+{% if sp_error %}<p class="muted" style="margin:4px 0 0;font-size:12.5px">SharePoint pull not available: {{ sp_error }}</p>{% endif %}
 <p class="muted" style="margin:4px 0 8px">Last import: {{ imported.strftime('%m/%d/%Y %H:%M') if imported else 'none' }}</p>
 <div class="alert {{ 'warn' if check_blocking else 'ok' }}" style="font-size:13px">{{ check_msg }}</div>
 

@@ -14,7 +14,8 @@ from sqlalchemy.orm import sessionmaker
 from .. import config
 from ..db import Base, make_engine
 from . import report as rep
-from .maintenance import import_maintenance
+from .columns import ColumnProblem, check_register, check_subscription
+from .maintenance import import_maintenance, read_register
 from .mapper import ImportReport, Mapper
 from .sheet.reader import read_workbook
 
@@ -117,13 +118,14 @@ def user_changes(engine) -> int:
 
 def run_import(source: Path | None = None, url: str | None = None, today: dt.date | None = None,
                report_dir: Path | None = None, maintenance: Path | None | bool = None,
-               force: bool = False) -> ImportReport:
-    """maintenance: path, None = auto-detect in data/source, False = skip.
+               force: bool = False, schema: str | None = None) -> ImportReport:
+    """maintenance: path, None = auto-detect in data/source, False = skip. schema: import into that schema of the
+    database instead of the live tables (the Spreadsheet check's throwaway import).
     Refuses to wipe a database that has changes made in the app, unless force=True."""
     source = Path(source or config.source_workbook())
     if maintenance is None:
         maintenance = config.maintenance_workbook()
-    engine = make_engine(url)
+    engine = make_engine(url, schema=schema)
     n = user_changes(engine)
     if n and not force:
         engine.dispose()
@@ -132,12 +134,21 @@ def run_import(source: Path | None = None, url: str | None = None, today: dt.dat
     try:                                              # read the workbook first: a locked / broken file must not
         sha = hashlib.sha256(source.read_bytes()).hexdigest()       # leave an emptied database behind
         wb = read_workbook(source)                    # read-only
+        check = check_subscription(wb)                # renamed / missing / look-alike columns: refuse here,
+        if maintenance:                               # before the database is touched
+            m_check = check_register(read_register(Path(maintenance)))
+            check.errors += m_check.errors
+            check.new_columns += m_check.new_columns
+        check.raise_if_errors()
     except Exception:
         engine.dispose()
         raise
     docs = snapshot_documents(engine)
     reset_schema(engine)
-    report = ImportReport(source=str(source), source_sha256=sha, started=dt.datetime.now().isoformat(timespec="seconds"))
+    report = ImportReport(source=str(source), source_sha256=sha, started=dt.datetime.now().isoformat(timespec="seconds"),
+                          new_columns=check.new_columns)
+    for col in check.new_columns:
+        report.add("warning", None, f"New column, not imported: {col}", where="columns")
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     with Session() as s:
         m = Mapper(s, wb, report, today or dt.date.today())
@@ -176,6 +187,8 @@ def run_maintenance_import(path: Path | None = None, url: str | None = None, rep
     path = Path(path or config.maintenance_workbook() or "")
     if not path.name:
         raise ImportRefused("No maintenance workbook in data/source.")
+    m_check = check_register(read_register(path))     # before anything is deleted
+    m_check.raise_if_errors()
     engine = make_engine(url)
     n = maintenance_changes(engine)
     if n and not force:
@@ -187,7 +200,10 @@ def run_maintenance_import(path: Path | None = None, url: str | None = None, rep
     cfg.attributes["engine"] = engine
     command.upgrade(cfg, "head")
     report = ImportReport(source=str(path), source_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
-                          started=dt.datetime.now().isoformat(timespec="seconds"), maintenance_only=True)
+                          started=dt.datetime.now().isoformat(timespec="seconds"), maintenance_only=True,
+                          new_columns=m_check.new_columns)
+    for col in m_check.new_columns:
+        report.add("warning", None, f"New column, not imported: {col}", where="columns")
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     docs = snapshot_documents(engine)
     with Session() as s:
@@ -236,42 +252,17 @@ def check_status() -> tuple[str, int]:
     return msg, errors + (1 if changed else 0)
 
 
-def backup_database(label: str) -> Path | None:
-    """Copy the database to data/backups/subscriptions-before-<label>-<stamp>.db (None: nothing to back up).
-    The backup is a SQLite file; from PostgreSQL it is copied table by table (app/dbcopy.py)."""
-    import sqlite3
-    from sqlalchemy.engine import make_url
-    url = make_url(config.database_url())
-    dst = config.DATA_DIR / "backups" / f"subscriptions-before-{label}-{dt.datetime.now():%Y%m%d-%H%M%S}.db"
-    if url.get_backend_name() != "sqlite":
-        from ..dbcopy import copy_engines, schema_revision
-        engine = make_engine(url.render_as_string(hide_password=False))
-        try:
-            if schema_revision(engine) is None:
-                return None                                  # empty database
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            out = make_engine(f"sqlite:///{dst.as_posix()}")
-            try:
-                copy_engines(engine, out)
-            except Exception:
-                out.dispose()
-                dst.unlink(missing_ok=True)
-                raise
-            out.dispose()
-            return dst
-        finally:
-            engine.dispose()
-    db = Path(url.database) if url.database else None
-    if db is None or not db.exists() or db.stat().st_size == 0:
-        return None
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    src, out = sqlite3.connect(db), sqlite3.connect(dst)
+def backup_database(label: str) -> str | None:
+    """Copy the database into a new backup schema (app/backups.py); None when it is still empty."""
+    from .. import backups
+    from ..dbcopy import schema_revision
+    engine = make_engine()
     try:
-        src.backup(out)
+        if schema_revision(engine) is None:
+            return None
+        return backups.make(engine, f"before {label}")
     finally:
-        out.close()
-        src.close()
-    return dst
+        engine.dispose()
 
 
 def main(argv=None):
@@ -300,7 +291,7 @@ def main(argv=None):
             print(f"Invoices: {r.maintenance_invoices}  Notes: {len(r.notes)}")
             return
         r = run_import(args.source, force=args.force)
-    except ImportRefused as e:
+    except (ImportRefused, ColumnProblem) as e:
         raise SystemExit(f"Import refused: {e}")
     print(f"Imported: {r.db_counts}")
     print(f"Notes: {len(r.notes)}  Reconciliation differences: {len(r.reconciliation)}")

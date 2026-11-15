@@ -2,7 +2,7 @@
 {% block title %}Database{% endblock %}
 {% block content %}
 <h1>Database</h1>
-<p class="sub">Read-only view of <span class="mono">{{ db_url.split('///')[-1] }}</span>. Change data through the app's workflows so the audit log stays complete.</p>
+<p class="sub">Read-only view of <span class="mono">{{ db_label }}</span> · {{ '%.1f'|format(db_size / 1048576) }} MB including backups. Change data through the app's workflows so the audit log stays complete.</p>
 <style>
   .dbl { stroke: #9fb0d0; stroke-width: 1.5; }
   .dbb rect { fill: var(--panel); stroke: var(--accent); stroke-width: 1.2; }
@@ -10,6 +10,15 @@
   .dbt { font: 600 13px "Segoe UI", sans-serif; fill: var(--ink); }
   .dbn { font: 11.5px "Segoe UI", sans-serif; fill: var(--muted); }
 </style>
+
+<div class="panel">
+  <h2 style="margin-top:0">Backups ({{ backups|length }})</h2>
+  <p class="muted" style="margin-top:-4px">A full copy of every table is taken before each Refresh or import, as its own PostgreSQL schema; the newest {{ keep }} are kept.
+    To put one back: <span class="mono">docker compose exec app python scripts/restore_backup.py &lt;name&gt;</span> (the current data is backed up first).</p>
+  {% if backups %}<table><tr><th>Backup</th><th>Taken</th><th>Why</th></tr>
+  {% for b in backups %}<tr><td class="mono">{{ b.name }}</td><td style="white-space:nowrap">{{ b.taken.strftime('%m/%d/%Y %H:%M:%S') if b.taken else '' }}</td><td>{{ b.label }}</td></tr>{% endfor %}
+  </table>{% else %}<p class="muted" style="margin:0">None yet.</p>{% endif %}
+</div>
 
 <div class="panel">
   <h2 style="margin-top:0">How the tables connect</h2>

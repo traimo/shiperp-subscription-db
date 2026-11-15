@@ -45,18 +45,13 @@ subscription starts; in the current year it stops counting once the subscription
   also has a Terminate button for just that contract.
 
 ## Run
-```powershell
-pip install -r requirements.txt
-python -m app.importer      # drop + migrate + load both workbooks in data\source; writes data\reports\
-.\run.ps1                   # http://127.0.0.1:8001
-python -m pytest -q
-```
-`DATABASE_URL` (in `.env`) switches to PostgreSQL / Azure SQL; the schema is managed with Alembic (`alembic/`).
-After pulling schema changes into an existing database, stop the app and run `python -m alembic upgrade head`.
+The app runs in Docker on PostgreSQL only (see "Run in Docker" below): `docker compose up -d --build`, then
+http://localhost:8021. The schema is managed with Alembic (`alembic/`); the app container runs `alembic upgrade head`
+on every start.
 
 Money is `Decimal`: amounts are `NUMERIC(14,2)` (migration 0004), every assignment is rounded to the cent half-up
 (`app/money.py`), and derived figures (ARR, monthly revenue, deferred) are computed in Decimal and rounded only for
-display. SQLite stores NUMERIC as REAL and rounds back to 2 places on read; SQL Server / PostgreSQL store it exactly.
+display.
 
 Contract documents (SharePoint links only): every term and maintenance line has a "Contract documents" panel, and the
 customer page a **Link** button in its Docs column. Paste the file's SharePoint link (https://…sharepoint.com; direct
@@ -71,19 +66,25 @@ unmatched ones stay on the customer as "unlinked").
 `.env` needs `POSTGRES_PASSWORD` and `DASHBOARD_DB_PASSWORD` (hex; see `.env.example`) besides the `SP_*` values.
 ```powershell
 docker compose up -d --build                      # app runs `alembic upgrade head`, then serves; /healthz = probe
-python scripts/sqlite_to_postgres.py               # one-off: data\subscriptions.db -> Postgres (replaces all rows)
-docker compose cp "data/source/." app:/app/data/source/   # workbooks for Import / Refresh without SharePoint
+python -m pip install -r requirements.txt         # host side: tests and scripts
+python -m pytest -q                               # needs the db container (uses database subs_test)
 ```
-- **Import the spreadsheets** into Postgres with the header's **Refresh data** (pulls from SharePoint, or uses the
-  files in the container's `data/source`), or `docker compose exec app python -m app.importer`. Backups are still
-  SQLite files (`data/backups` in the `appdata` volume), copied table by table from Postgres (`app/dbcopy.py`).
+- **Import the spreadsheets** into Postgres with the header's **Refresh data**: upload the two workbooks from your
+  computer, pull them from SharePoint, or re-import the copies already in the app. Command line:
+  `docker compose exec app python -m app.importer`.
+- **Backups**: before every Refresh / import the whole database is copied into its own schema
+  (`backup_YYYYMMDD_HHMMSS`, `app/backups.py`); the newest 10 are kept and listed on the Database page. Put one back
+  with `docker compose exec app python scripts/restore_backup.py <name>` (lists them without a name; the current data
+  is backed up first). The dashboard's `dashboard_ro` login cannot read the backup schemas.
 - **shiperp-dashboard** reads as `dashboard_ro` (SELECT only; password `DASHBOARD_DB_PASSWORD`) at `db:5432`,
   database `subscriptions`, after joining the external network `shiperp`. The role is created when the `pgdata`
   volume is first initialised (`services/db/init/`); a re-import keeps its grant (default privileges).
 - From Windows, use `127.0.0.1`, not `localhost`, in Postgres URLs (localhost tries IPv6 first: ~2 s per connection).
-- Postgres tests: `$env:TEST_DATABASE_URL="postgresql+psycopg://subs:<pw>@127.0.0.1:5433/subs_test"` then
-  `python -m pytest -q tests/test_postgres.py` (a throwaway database: every test drops its tables).
-- The non-Docker app (`run.ps1`, port 8001) keeps using SQLite unless `.env` sets `DATABASE_URL`.
+- Tests run against the throwaway database `subs_test` in the same container (created on first run; URL built from
+  `POSTGRES_PASSWORD`, or set `TEST_DATABASE_URL`). Each test works in its own schema; the live `subscriptions`
+  database is refused. If the container is not running, every test is skipped with a message.
+- The SQLite file used before the move (`data\subscriptions.db`) and its `.db` backups are archived in `data\archive\`
+  and no longer used.
 
 ## Maintenance (perpetual licences) — see MAINTENANCE-WORKBOOK.md
 Tables: `maintenance_contract` (one register line: block, product, anniversary month / calendar billing, go-live,
@@ -108,20 +109,22 @@ The app has no sign-in (it runs on the user's own machine), so it protects itsel
 same browser: it answers only to `127.0.0.1` / `localhost` (add names with `APP_ALLOWED_HOSTS` in `.env`), form
 posts from another site are refused (Origin / Referer check), `back` links only go to pages of the app, and CSV exports
 prefix text cells starting with `= + - @` with an apostrophe so Excel does not run them as formulas.
-`python -m app.importer` backs the database up to `dataackups\` first and reads the workbook before anything is
-dropped (a locked or broken file leaves the database as it was).
+`python -m app.importer` backs the database up (a `backup_*` schema) first and reads the workbook before anything is
+dropped (a locked or broken file, or renamed / look-alike columns, leave the database as it was).
 
 ## Viewing the database
 - In the app: **Database** in the top menu (`/db`) — table list with row counts and purpose, a diagram of how the
   tables connect, and per-table pages (structure, search, sort, paging, click foreign keys to follow them). Read-only.
-- Outside the app: open `data\subscriptions.db` with PyCharm's Database tool window (Data Source → SQLite) or DB Browser
-  for SQLite. Don't edit data there: it bypasses the audit log and the business rules.
+  The page names the database (never the login), shows its size and the backup list.
+- Outside the app: any PostgreSQL client (e.g. PyCharm's Database tool window) at `127.0.0.1:5433`, database
+  `subscriptions` - preferably as the read-only `dashboard_ro`. Don't edit data there: it bypasses the audit log and
+  the business rules.
 
 ## Before go-live: spreadsheet check
 Goal: make both source workbooks 100 % accurate, then import. **Spreadsheet check** (menu) or
 `python -m app.checker [--export]` reads the workbooks in `data\source\` (read-only) and lists every issue with its
 exact cell, the current and expected value and how to fix it. Importer-based findings come from a trial import into a
-temp folder - the real database and import report are never touched.
+throwaway schema (`sheetcheck_<pid>`, dropped afterwards) - the live tables and import report are never touched.
 
 1. Run the check; work through **errors** (wrong data), **decisions** (open ARR rules: cancellations, renewal
    transition years), then **warnings**; **info** is spelling / tidy-up.
@@ -133,14 +136,17 @@ temp folder - the real database and import report are never touched.
    asks to confirm while errors are open or a workbook changed since the check (`--yes` skips the question).
 
 ## Refresh data (header button)
-Lets accounting see how their workbook edits change the app's numbers. **Refresh data** opens a popup showing the two
-workbooks on SharePoint (last modified, by whom, changed since the last import?), the spreadsheet check status and the
-changes made in the app since the last import, then:
+Loads the workbooks (the production source of truth until go-live) into the database. **Refresh data** opens a popup
+with three sources - **upload** the two workbooks from this computer (Subscription Summary required; Maintenance
+optional, the current copy is kept if left empty; .xlsx, max 25 MB each), **pull** them from SharePoint (when set up;
+shows last modified / by whom / changed since the last import), or re-import the copies **already in the app** - plus
+the spreadsheet check status and the changes made in the app since the last import, then:
 
-1. downloads both workbooks (read-only Microsoft Graph), checks they open, and swaps them into `data\source` (old
-   copies -> `dataackups\source-<stamp>\`); without SharePoint access the popup offers the files already there;
-2. backs up the database (`dataackups\subscriptions-before-refresh-<stamp>.db`) and saves the change list
-   (`audit-before-refresh-<stamp>.json`);
+1. checks the new workbooks (name, opens as Excel) and swaps them into `data/source` (old copies ->
+   `data/backups/source-<stamp>/`); nothing changes if one is bad;
+2. backs up the database into a `backup_YYYYMMDD_HHMMSS` schema and saves the change list
+   (`data/backups/audit-before-refresh-<stamp>.json`); the column check (renamed / look-alike columns) refuses here,
+   before any table is touched;
 3. re-imports (every table, including the audit log, is rebuilt from the workbooks; contract links are kept);
 4. **Reapply?** - default **Do not reapply**: the database then matches the workbooks exactly. "Reapply" replays the
    changes through the normal operations (`app/reapply.py`), matching rows by customer number + sheet ref (or, for
@@ -152,9 +158,8 @@ changes made in the app since the last import, then:
 
 Setup (`.env`): `SP_TENANT_ID`, `SP_CLIENT_ID`, `SP_CLIENT_SECRET` (Entra app with Sites.Selected **read** on the
 fi_team site) and the sharing links `SP_SUBSCRIPTION_URL`, `SP_MAINTENANCE_URL`. The app only reads the workbooks; it
-never writes to SharePoint, and contract documents stay links-only. SQLite only (the backup is a file copy).
-Test it on a copy: the `db-ui-refresh-test` launch entry runs on `data\check\subscriptions-refresh.db` with backups
-and reports in `data\check\`.
+never writes to SharePoint, and contract documents stay links-only. Without these the popup offers upload and the
+copies already in the app.
 
 ## Import rules (see the Import page for every decision with its sheet reference)
 - A → NET_NEW subscription + INITIAL term; B → CONVERSION; C → ADD_ON; D → RENEWAL superseding the rows named in the

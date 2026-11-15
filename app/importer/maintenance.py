@@ -123,6 +123,7 @@ class MaintenanceSheet:
     row_revenue: dict[int, dict[int, float]]  # sheet row -> {year: Total Revenue}
     header_row: int = 0                     # Excel row of the header
     grand_total_row: int | None = None      # Excel row of GRAND TOTAL
+    header_text: dict[int, str] = field(default_factory=dict)   # 0-based column -> header as written
 
 
 def read_register(path: Path) -> MaintenanceSheet:
@@ -133,7 +134,10 @@ def read_register(path: Path) -> MaintenanceSheet:
         rows = list(wb[SHEET].iter_rows(values_only=True))
     finally:
         wb.close()
-    hdr_i = next(i for i, r in enumerate(rows[:10]) if sum(1 for v in r if YEAR_RE.match(str(v or ""))) >= 3)
+    hdr_i = next((i for i, r in enumerate(rows[:10]) if sum(1 for v in r if YEAR_RE.match(str(v or ""))) >= 3), None)
+    if hdr_i is None:
+        raise ValueError(f"No header row with at least 3 fee-year columns ('2025-2026') in the first 10 rows of "
+                         f"'{SHEET}' in {Path(path).name}")
     header = rows[hdr_i]
     years, by_name = {}, defaultdict(list)
     revenue_cols, deferred_cols = {}, {}
@@ -158,7 +162,8 @@ def read_register(path: Path) -> MaintenanceSheet:
     rev, dfr = defaultdict(float), defaultdict(float)
     row_rev: dict[int, dict[int, float]] = {}
     grand_row = None
-    for i, r in enumerate(rows[hdr_i + 1:], start=hdr_i + 2):
+    body = rows[hdr_i + 1:] if c_name is not None and c_num is not None else []   # columns.check_register reports it
+    for i, r in enumerate(body, start=hdr_i + 2):
         a = r[0]
         if isinstance(a, str) and _norm(a).startswith("grand total"):
             grand = {years[j]: float(r[j] or 0) for j in years if _num(r[j]) is not None}
@@ -188,7 +193,9 @@ def read_register(path: Path) -> MaintenanceSheet:
             for y, j in deferred_cols.items():
                 if _num(r[j]) is not None:
                     dfr[y] += float(r[j])
-    return MaintenanceSheet(str(path), cols, out, grand, dict(rev), dict(dfr), row_rev, hdr_i + 1, grand_row)
+    header_text = {j: str(h).strip() for j, h in enumerate(header) if h is not None and str(h).strip()}
+    return MaintenanceSheet(str(path), cols, out, grand, dict(rev), dict(dfr), row_rev, hdr_i + 1, grand_row,
+                            header_text)
 
 
 # --------------------------------------------------------------------------------------------- invoices
