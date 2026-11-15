@@ -187,7 +187,7 @@ Future-year (2027+) differences are mostly cells the sheet never filled.
 Editing maintenance fees in the UI (read-only today), roles beyond one access group, deferred revenue / GL tie-out, attachments,
 Salesforce/QuickBooks integration.
 
-## Azure (planned deployment)
+## Azure (live since 2026-11-15)
 az-deploy-agent deploys `compose.yaml` to the private Container Apps environment `cae-agents-private` (westus2,
 VPN only), one replica.
 
