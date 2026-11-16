@@ -6,7 +6,7 @@ Run it after the deployer's first pass has created the (empty) vault and given y
 the deployer again. Every `${NAME}` without a default in compose.yaml becomes Key Vault secret `name-with-dashes`.
 Where each value comes from:
   - SP_*                 this project's .env (the read-only SharePoint app for Refresh data)
-  - ENTRA_*              shiperp-dashboard's .env: sign-in reuses the dashboard's Entra app (same access group)
+  - ENTRA_*              shiperp-dashboard's .env: sign-in reuses the dashboard's Entra app registration (access group is this app's own: ALLOWED_GROUP)
   - DATABASE_URL         built from AZ_PG_SUBS_PASSWORD in .env: login `subs` on psql-shiperp-subs, TLS required
   - SESSION_SECRET_KEY   generated fresh (never a local key)
   - REDIRECT_URI         https://<app FQDN>/auth/callback (--fqdn; add it to the Entra app's web redirect URIs)

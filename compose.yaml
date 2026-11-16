@@ -27,7 +27,7 @@ services:
       SP_MAINTENANCE_URL: ${SP_MAINTENANCE_URL}
       # Microsoft sign-in (app/auth.py), same flow as shiperp-dashboard. Never disabled on Azure.
       AUTH_DISABLED: "0"
-      ALLOWED_GROUP: ${ALLOWED_GROUP:-de1f99e4-f21c-41ed-81a1-fa5305ae9a0f}   # "ShipERP Dashboard Users" (not a secret)
+      ALLOWED_GROUP: ${ALLOWED_GROUP:-ed6912b9-0811-4641-9bf0-ec0949e53c23}   # "ShipERP Subscription DB Users" (not a secret; the dashboard has its own group)
       ALLOWED_USERS: ${ALLOWED_USERS:-}
       ENTRA_TENANT_ID: ${ENTRA_TENANT_ID}
       ENTRA_CLIENT_ID: ${ENTRA_CLIENT_ID}

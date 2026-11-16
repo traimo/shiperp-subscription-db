@@ -30,6 +30,35 @@ For **future years** a signed conversion counts from signing (confirmed 2026-11-
 maintenance of a year after the current one is not ARR as soon as the conversion is signed, even before the
 subscription starts; in the current year it stops counting once the subscription is in force.
 
+## Deferred Billing (header link, `/deferred-billing`)
+For each customer and each month-end it shows two figures:
+- **Balance** = TCV ("TCV - NN & Existing") less the amounts invoiced up to that month-end.
+- **Invoiced** = the amount invoiced in that month.
+
+How it works:
+- **Data:** read from PostgreSQL (`term.tcv` and the `invoice` table), so invoices recorded in the app count straight
+  away. The import fills those from the workbook's "Amount" and monthly billing columns, found by header text.
+- **When a contract counts:** from its start or its first invoice, whichever is earlier. Before that it is blank, so
+  a renewal doesn't inflate earlier months.
+- **Undated invoices** count at 12/31 of their billing year.
+- **Over-billing:** invoicing more than the TCV gives a negative balance, shown in parentheses.
+- **Columns** run from the first contract month through the later of this month and the last invoice month.
+- **Rows:** each customer row expands to show its contracts. Totals of both figures are at the bottom.
+- **"With a balance"** (the default) hides customers whose balance is zero in every month.
+- **Download Excel** (`/deferred-billing.xlsx`) gives the same view and filters: a Balance and an Invoiced column per
+  month, with the contracts grouped under each customer.
+
+Code: `app/deferred.py` (calculation), `app/deferred_export.py`; tests in `tests/test_deferred.py`.
+
+**Cross-check against the workbook:** the test compares 431 year-end balances with the workbook's own "GL#1215
+Deferred Billing" columns. 30 differ, all from workbook data:
+- duplicate entries in the 2020 group (A90, A91);
+- invoice dates in a different year from their column group (Cloud A10, A61, A66);
+- TCV 0 with a deferred balance (A87, A88);
+- invoiced more than the TCV (A20).
+
+Amended contracts are also affected, because the database splits the TCV between the old and the new term.
+
 ## Conversion, add-on, termination (workflows)
 - **Conversion** (customer page) replaces the perpetual licence: it creates the CONVERSION subscription and, for each
   ticked maintenance line (ticked by default), stops maintenance (explicit 0) from the first contract year starting on
@@ -111,6 +140,9 @@ Microsoft (Entra ID) sign-in, the same flow as shiperp-dashboard (`app/auth.py`)
 `/auth/callback`; access for members of `ALLOWED_GROUP` and/or e-mails on `ALLOWED_USERS`; the audit log records the
 signed-in e-mail. `AUTH_DISABLED=1` (the local Docker default) turns it off, and the app refuses to start that way when
 `APP_ALLOWED_HOSTS` names any non-loopback host. With sign-in on, `SESSION_SECRET_KEY` (32+ characters) is required.
+Each session records a fingerprint of the access rule (`ALLOWED_GROUP` + `ALLOWED_USERS`) it was granted under; when
+either setting changes, existing sessions are sent back through sign-in, so the new rule applies at once rather than
+when the 12-hour session ends.
 
 ## Safety on the local machine
 With sign-in off locally, the app protects itself from other web pages open in the
@@ -207,7 +239,9 @@ firewall rule; `az storage account update --public-network-access …` plus a ne
 `DATABASE_URL` (Key Vault secret `database-url`) must end in `?sslmode=require`. `/app/data` is the Azure Files share
 mounted after the deploy (spreadsheet-check acceptances and reports live there).
 
-Sign-in reuses **shiperp-dashboard's Entra app** (same tenant, client and access group "ShipERP Dashboard Users").
+Sign-in reuses **shiperp-dashboard's Entra app registration** (same tenant and client), but access is separate: this
+app admits only its own group, "ShipERP Subscription DB Users" (`ALLOWED_GROUP` default in compose.yaml), while the
+dashboard admits "ShipERP Dashboard Users". Who can use which app is decided by group membership in Entra.
 The app's host name is fixed by the deployer as `<repo>-<service>`:
 `shiperp-subscription-db-app.bravesmoke-02934eef.westus2.azurecontainerapps.io` (the `APP_ALLOWED_HOSTS` default in
 compose.yaml; change it there if the first-pass report shows another name).

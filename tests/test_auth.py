@@ -140,6 +140,45 @@ def test_sign_in_sets_actor_to_the_users_email(monkeypatch):
     assert FakeMsal.built == 1                                 # one MSAL client for start + callback
 
 
+def test_access_policy_changes_with_the_group_or_the_users():
+    base = cfg().access_policy
+    assert cfg().access_policy == base                                            # stable across restarts
+    assert cfg(allowed_group="99999999-0000-0000-0000-000000000000").access_policy != base
+    assert cfg(allowed_users={"allowed@erp-is.com", "new@erp-is.com"}).access_policy != base
+    assert cfg(allowed_users={"b@erp-is.com", "a@erp-is.com"}).access_policy == \
+        cfg(allowed_users={"a@erp-is.com", "b@erp-is.com"}).access_policy      # order does not matter
+
+
+def test_changing_the_access_group_signs_existing_sessions_out(monkeypatch):
+    """Sessions record the access rule they were granted under; a new ALLOWED_GROUP applies at once, not after 12 h."""
+    s = cfg(allowed_users=set())
+    c = make_client(monkeypatch, s, {"preferred_username": "Member@erp-is.com", "groups": [GROUP]})
+    sign_in(c)
+    assert c.get("/who").json() == {"actor": "member@erp-is.com"}
+    s.allowed_group = "99999999-0000-0000-0000-000000000000"     # the app now admits a different group
+    r = c.get("/who", headers=PAGE, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/login?next=%2Fwho"
+    assert c.get("/who", headers={"accept": "*/*"}, follow_redirects=False).status_code == 401  # session cleared
+    r = sign_in(c)                                                 # only in the old group: now refused
+    assert r.status_code == 403 and "subscription database access group" in r.text
+
+
+def test_session_without_a_recorded_policy_must_sign_in_again(monkeypatch):
+    """Sessions created before policies were recorded (the deploy that splits the groups) are not trusted."""
+    c = make_client(monkeypatch, cfg(), {"preferred_username": "Member@erp-is.com", "groups": [GROUP]})
+
+    @c.app.get("/drop-policy")
+    def drop_policy(request: auth.Request):
+        request.session["user"].pop("policy", None)
+        request.session["user"] = dict(request.session["user"])
+        return {"ok": True}
+
+    sign_in(c)
+    assert c.get("/drop-policy").json() == {"ok": True}
+    r = c.get("/who", headers=PAGE, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("/login")
+
+
 def test_denied_user_gets_403_and_no_session(monkeypatch):
     c = make_client(monkeypatch, cfg(), {"preferred_username": "outsider@erp-is.com", "groups": ["other"]})
     r = sign_in(c)

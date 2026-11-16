@@ -14,6 +14,7 @@ ALLOWED_USERS, SESSION_SECRET_KEY, AUTH_DISABLED.
 from __future__ import annotations
 
 import contextvars
+import hashlib
 import logging
 import os
 import secrets
@@ -80,6 +81,14 @@ class Settings:
     @property
     def configured(self) -> bool:
         return bool(self.tenant_id and self.client_id and self.client_secret and self.redirect_uri)
+
+    @property
+    def access_policy(self) -> str:
+        """A fingerprint of who may sign in (ALLOWED_GROUP + ALLOWED_USERS), stored in each session at sign-in. When
+        either setting changes, existing sessions no longer match and must sign in again, so the new rule applies at
+        once instead of after the 12-hour session ends."""
+        raw = self.allowed_group + "|" + ",".join(sorted(self.allowed_users))
+        return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
     @property
     def exposed(self) -> bool:
@@ -231,6 +240,12 @@ def install(app, cfg: Settings) -> None:
         if cfg.auth_disabled or is_public(path):
             return await call_next(request)
         user = current_user(request)
+        if user and user.get("policy") != cfg.access_policy:
+            # Signed in under an earlier access rule (another group/allow-list, or before policies were recorded):
+            # sign in again so the current rule decides.
+            log.info("session for oid %s predates the current access rule; signing in again", user.get("oid"))
+            request.session.clear()
+            user = None
         if not user:
             accept = request.headers.get("accept", "")
             # Scripts (fetch: Accept */* or JSON, or our X-Requested-With) get 401 and handle it themselves.
@@ -290,7 +305,8 @@ def install(app, cfg: Settings) -> None:
             request.session.clear()
             return HTMLResponse(denied_page(email or "This account", reason, logout_url(cfg)), status_code=403)
         log.info("access granted for oid %s via %s", claims.get("oid"), reason)
-        request.session["user"] = {"name": claims.get("name") or email, "email": email, "oid": claims.get("oid")}
+        request.session["user"] = {"name": claims.get("name") or email, "email": email, "oid": claims.get("oid"),
+                                   "policy": cfg.access_policy}
         return RedirectResponse(safe_next(request.session.pop("next", "/")), status_code=303)
 
     @app.get("/logout", include_in_schema=False)
