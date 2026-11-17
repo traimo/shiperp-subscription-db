@@ -17,6 +17,8 @@ YTD_RE = re.compile(r"ytd\s+gaap\s+revenue\s*-?\s*(20\d\d)")
 # "GL#1215.3 Deferred Billing" (no date)
 HALF_YEAR_RE = re.compile(r"^jan(uary)?\s+(to|-)\s+june?\s+(20\d\d)$")
 UNDATED_DEFERRED_RE = re.compile(r"^gl#?\s*1215[\d.]*\s+deferred billing")
+# A billing group's amount column: "Amount", or "Invoice Amount" (section A of the On-Prem tab, from 2026-11-17)
+BILL_AMOUNT_RE = re.compile(r"^(invoice )?amount$")
 
 
 def norm(text) -> str:
@@ -105,7 +107,8 @@ def classify(raw_headers: dict[int, object], issues: HeaderIssues | None = None)
     """Map canonical keys to 1-based column numbers for one header row.
 
     Keys produced: the simple keys above, prior_arr / arr_change (the two "NOT APPLICABLE" columns),
-    arr_YYYY (year ARR columns), bill_date_YYYY / bill_amount_YYYY / deferred_billing_YYYY (billing groups),
+    arr_YYYY (year ARR columns), bill_date_YYYY / bill_amount_YYYY ("Amount" or "Invoice Amount") /
+    deferred_billing_YYYY (billing groups),
     rev_month_YYYY_MM (monthly revenue columns), rev_q_YYYY_N, rev_ytd_YYYY.
     Monthly billing layout (2026 on): bill_date_YYYY, bill_amount_YYYY (the "Jan to June" amount),
     bill_month_YYYY_MM (one per month-end column), bill_total_YYYY, deferred_billing_YYYY.
@@ -142,7 +145,7 @@ def classify(raw_headers: dict[int, object], issues: HeaderIssues | None = None)
             in_schedule = True
             put("rev_deferred_beg", col)
             continue
-        if not in_schedule and (h == "date invoiced" or h == "amount"):
+        if not in_schedule and (h == "date invoiced" or BILL_AMOUNT_RE.match(h)):
             pending_billing.append(("bill_date" if h == "date invoiced" else "bill_amount", col))
             continue
         if not in_schedule:

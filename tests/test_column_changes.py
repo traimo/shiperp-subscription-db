@@ -172,6 +172,67 @@ def test_refresh_lists_new_columns(env, monkeypatch):  # noqa: F811
     assert r["after"] == plain["after"]
 
 
+# ------------------------------------------------------------------------------------------------ billing "Amount"
+# 2026-11-17: the 2020 billing "Amount" of section A (On-Prem, row 8, column AW) was renamed "Invoice Amount". The exact
+# match on "amount" then dropped that section's 2020 invoices (437,288) and only listed the column as new.
+
+def test_classify_reads_invoice_amount_as_the_billing_amount():
+    issues = HeaderIssues()
+    cols = classify({1: "Customer Number", 2: "Date Invoiced", 3: "Invoice Amount",
+                     4: "12/31/2020-GL#1215.3 Deferred Billing", 5: "Date Invoiced", 6: "Amount",
+                     7: "12/31/2021-GL#1215.3 Deferred Billing"}, issues)
+    assert (cols["bill_date_2020"], cols["bill_amount_2020"], cols["deferred_billing_2020"]) == (2, 3, 4)
+    assert (cols["bill_date_2021"], cols["bill_amount_2021"]) == (5, 6)
+    assert issues.unknown == []
+
+
+def _rename_first_amount(new):
+    """Rename the first billing 'Amount' header in the On-Prem tab's first header row only (as in the workbook)."""
+    def change(wf, wv):
+        name = next(n for n in wf.sheetnames if reader._tab_key(n) == "onprem")
+        row = _header_rows(wf[name])[0]
+        col = next(c.column for c in wf[name][row] if c.value and norm(c.value) == "amount")
+        for ws in (wf[name], wv[name]):
+            ws.cell(row, col).value = new
+    return change
+
+
+def _bill_amounts(wb: Workbook, year: int):
+    return sorted((c.tab, c.section, c.values.get("customer_number"), str(c.values.get("period")),
+                   c.values.get(f"bill_amount_{year}"))
+                  for t in wb.tabs.values() for c in t.contracts if c.values.get(f"bill_amount_{year}"))
+
+
+@needs_source
+def test_invoice_amount_header_imports_the_same_amounts():
+    base = reader.read_workbook(_subscription_path())
+    wb = _modified(_rename_first_amount("Invoice Amount"))
+    assert _bill_amounts(wb, 2020) == _bill_amounts(base, 2020)
+    assert any(s == "A" for _, s, *_ in _bill_amounts(wb, 2020))       # section A's 2020 invoices are there
+    assert _contracts(wb) == _contracts(base)
+    check = check_subscription(wb)
+    assert check.errors == [] and check.new_columns == []
+
+
+@needs_source
+def test_unknown_amount_header_is_refused():
+    check = check_subscription(_modified(_rename_first_amount("Amt")))
+    assert any("no 'Amount' column for the 2020 billing (section A)" in e for e in check.errors)
+    with pytest.raises(ColumnProblem, match="was it renamed or deleted"):
+        check.raise_if_errors()
+
+
+@needs_source
+def test_refresh_refuses_a_missing_billing_amount(env, monkeypatch):  # noqa: F811
+    S, eng, paths = env
+    wb = _modified(_rename_first_amount("Amt"))
+    monkeypatch.setattr(cli, "read_workbook", lambda path: wb)
+    before = refresh.figures(S, TODAY)
+    with pytest.raises(refresh.RefreshError, match="no 'Amount' column for the 2020 billing"):
+        refresh.run(S, "tester", TODAY, pull_from_sharepoint=False, paths=paths)
+    assert refresh.figures(S, TODAY) == before
+
+
 # ------------------------------------------------------------------------------------------------ maintenance register
 
 def _maintenance_copy(tmp_path, change) -> Path:

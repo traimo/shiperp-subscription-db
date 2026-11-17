@@ -1,8 +1,9 @@
 """Column check before an import: the workbooks are read by header text, so a renamed, removed or look-alike column
 would otherwise import wrong data without a message.
 
-- errors: a required column is missing, or two columns match the same field (the importer would silently use the
-  left one). The import is refused before the database is touched.
+- errors: a required column is missing, a billing group has no amount column (its invoices would be skipped), or two
+  columns match the same field (the importer would silently use the left one). The import is refused before the
+  database is touched.
 - new_columns: headers in the contract columns that the importer does not know. They are imported as nothing and
   only listed, so someone can decide whether the app should store them.
 
@@ -12,6 +13,7 @@ column.
 """
 from __future__ import annotations
 
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 
@@ -53,6 +55,13 @@ def _letters(cols) -> str:
     return " and ".join(get_column_letter(c) for c in cols)
 
 
+def _billing_years_without_amount(colmap: dict[str, int]) -> list[str]:
+    """Billing groups (a 'Date Invoiced' or a GL#1215 deferred-billing column) whose amount column was not found: the
+    mapper reads invoices only from bill_amount_YYYY, so that year's invoices would be silently skipped."""
+    years = {m.group(2) for k in colmap if (m := re.fullmatch(r"(bill_date|deferred_billing)_(20\d\d)", k))}
+    return sorted(y for y in years if f"bill_amount_{y}" not in colmap)
+
+
 def check_subscription(wb: Workbook) -> ColumnCheck:
     out = ColumnCheck()
     name = "subscription workbook"
@@ -66,10 +75,13 @@ def check_subscription(wb: Workbook) -> ColumnCheck:
         missing: dict[str, list[str]] = {}
         dups: dict[tuple[str, tuple[int, ...]], list[str]] = {}
         new: dict[tuple[int, str], None] = {}
+        no_amount: dict[str, list[str]] = {}
         for letter, sec in tab.sections.items():
             for f in REQUIRED_FIELDS:
                 if f not in sec.colmap:
                     missing.setdefault(f, []).append(letter)
+            for year in _billing_years_without_amount(sec.colmap):
+                no_amount.setdefault(year, []).append(letter)
             if sec.issues:
                 for f, cols in sec.issues.checked_duplicates().items():
                     dups.setdefault((f, tuple(cols)), []).append(letter)
@@ -78,6 +90,9 @@ def check_subscription(wb: Workbook) -> ColumnCheck:
         for f, letters in missing.items():
             out.errors.append(f"{where}: no '{label(f)}' column (section {', '.join(letters)}) - "
                               "was it renamed or deleted?")
+        for year, letters in sorted(no_amount.items()):
+            out.errors.append(f"{where}: no 'Amount' column for the {year} billing (section {', '.join(letters)}) - "
+                              "was it renamed or deleted? Its invoices would not be imported.")
         for (f, cols), letters in dups.items():
             out.errors.append(f"{where}: columns {_letters(cols)} both look like '{label(f)}' "
                               f"(section {', '.join(letters)}); the import would use column "
