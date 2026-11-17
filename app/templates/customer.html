@@ -39,7 +39,8 @@
       <td class="num">{{ t.tcv|money }}</td>
       <td class="num">{{ '%g'|format(t.term_months) }}</td>
       <td class="num">{{ metrics.term_arr(t)|money }}{% if t.arr_override is not none %} <span class="badge b-warning" title="{{ t.arr_override_reason }}">override</span>{% endif %}</td>
-      <td><span class="badge {{ {'ACTIVE':'b-ok','CANCELLED':'b-error','SIGNED':'b-info'}.get(ts, 'b-muted') }}">{{ ts }}</span></td>
+      <td><span class="badge {{ {'ACTIVE':'b-ok','CANCELLED':'b-error','SIGNED':'b-info'}.get(ts, 'b-muted') }}">{{ ts }}</span>{% if metrics.is_projected(t, today) %}
+        <a class="badge b-warning" href="/term/{{ t.id }}#projected" title="Ended without a renewal on file: counted in ARR at {{ metrics.projected_arr(t)|money }} (prior ARR + {{ '%g'|format(metrics.projected_uplift(t) * 100) }}%) until the renewal or a termination is recorded">projected renewal +{{ '%g'|format(metrics.projected_uplift(t) * 100) }}%</a>{% endif %}</td>
       <td>{% for x in t.supersedes %}↳ {{ x.old_term_id }} {% endfor %}{% for x in t.superseded_by %}→ {{ x.new_term_id }} {% endfor %}</td>
       <td class="muted">{{ t.source_ref or '' }}</td>
       <td>{{ doc_cell(t.documents, '/term/' ~ t.id ~ '/documents', '/term/' ~ t.id, 'sub-' ~ sub.id) }}</td>
@@ -111,13 +112,17 @@
     {% else %}
     <tr><td>{{ sub.platform.value }} · {{ t.kind.value }} {{ t.id }}</td>
       {% for y in years %}{% set v = metrics.term_year_arr(t, y, today) %}<td class="num {{ 'zero' if not v }}">{{ v|money if v else '–' }}</td>{% endfor %}</tr>
+    {% if metrics.is_projected(t, today) %}
+    <tr class="projected"><td title="Estimate: prior ARR + uplift, counted in ARR until the renewal or a termination is recorded">↳ projected renewal of {{ t.id }} (+{{ '%g'|format(metrics.projected_uplift(t) * 100) }}%) <span class="badge b-warning">Projected</span></td>
+      {% for y in years %}{% set v = metrics.projected_year_arr(t, y, today) %}<td class="num {{ 'zero' if not v }}">{{ v|money if v else '–' }}</td>{% endfor %}</tr>
+    {% endif %}
     {% endif %}
     {% endfor %}{% endfor %}
     {% if c.maintenance_contracts %}<tr><td>Maintenance</td>{% for y in years %}{% set v = metrics.maintenance_year_arr(c, y) %}<td class="num {{ 'zero' if not v }}">{{ v|money if v else '–' }}</td>{% endfor %}</tr>{% endif %}
     {% if metrics.is_converted(c) %}<tr class="muted"><td>of which prepaid (converted, not ARR)</td>{% for y in years %}{% set v = metrics.converted_maintenance(c, y, today) %}<td class="num {{ 'zero' if not v }}">{{ ('−' ~ (v|money)) if v else '–' }}</td>{% endfor %}</tr>{% endif %}
     <tr><td><b>Customer ARR</b></td>{% for y in years %}{% set v = metrics.effective_year_arr(c, y, today) %}<td class="num"><b>{{ v|money if v else '–' }}</b></td>{% endfor %}</tr>
-    {% set ns = namespace(diff=false) %}{% for y in years %}{% if metrics.carr_year(c, y) != metrics.effective_year_arr(c, y, today) %}{% set ns.diff = true %}{% endif %}{% endfor %}
-    {% if ns.diff %}<tr><td title="Contracted ARR: ARR + contracts signed but not started">Customer CARR</td>{% for y in years %}{% set v = metrics.carr_year(c, y) %}<td class="num">{{ v|money if v else '–' }}</td>{% endfor %}</tr>{% endif %}
+    {% set ns = namespace(diff=false) %}{% for y in years %}{% if metrics.carr_year(c, y, today) != metrics.effective_year_arr(c, y, today) %}{% set ns.diff = true %}{% endif %}{% endfor %}
+    {% if ns.diff %}<tr><td title="Contracted ARR: ARR + contracts signed but not started">Customer CARR</td>{% for y in years %}{% set v = metrics.carr_year(c, y, today) %}<td class="num">{{ v|money if v else '–' }}</td>{% endfor %}</tr>{% endif %}
   </table>
   </div>
 </div>

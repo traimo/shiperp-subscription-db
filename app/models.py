@@ -126,6 +126,8 @@ class Term(Base):
     golive_note: Mapped[str | None] = mapped_column(String(200))
     transactional_volume: Mapped[str | None] = mapped_column(String(60))
     renewal_note: Mapped[str | None] = mapped_column(String(120))
+    # Uplift of the Projected Renewal once this term has ended unrenewed (0.05 = 5%); None = the app default.
+    projected_uplift: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
     billing_period: Mapped[str | None] = mapped_column(String(60))
     recent_invoice: Mapped[str | None] = mapped_column(String(120))
     next_action: Mapped[str | None] = mapped_column(String(200))
@@ -150,6 +152,8 @@ class Term(Base):
         CheckConstraint("tcv >= 0", name="ck_term_tcv"),
         CheckConstraint("term_months > 0", name="ck_term_months"),
         CheckConstraint("arr_override IS NULL OR arr_override >= 0", name="ck_term_arr_override"),
+        CheckConstraint("projected_uplift IS NULL OR (projected_uplift >= 0 AND projected_uplift <= 0.5)",
+                        name="ck_term_projected_uplift"),
     )
 
 

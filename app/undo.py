@@ -60,7 +60,8 @@ def _load(col, v):
 
 
 def _norm(row: dict | None) -> dict | None:
-    """Comparable form: Decimals compared as numbers rounded to cents (values read back from JSON may carry more places)."""
+    """Comparable form: Decimals compared as numbers rounded to 4 places (values read back from JSON may carry more
+    places; 4, not cents, so a percentage such as term.projected_uplift 0.05 -> 0.054 still counts as a change)."""
     if row is None:
         return None
     out = {}
@@ -68,7 +69,7 @@ def _norm(row: dict | None) -> dict | None:
         if isinstance(v, str):
             try:
                 if "." in v and v.replace(".", "", 1).lstrip("-").isdigit():
-                    v = str(Decimal(v).quantize(Decimal("0.01")))
+                    v = str(Decimal(v).quantize(Decimal("0.0001")))
             except Exception:
                 pass
         out[k] = v

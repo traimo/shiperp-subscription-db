@@ -11,7 +11,7 @@ from typing import Callable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import metrics
+from . import config, metrics
 from .money import D, cents
 from .models import (AccountExec, AuditLog, CheckResult, ControlCheck, Customer, Invoice, OpenedVia, Platform,
                      Reseller, Subscription, Term, TermKind, TermSupersession, Termination, TerminationReason,
@@ -332,7 +332,21 @@ def terminate(s: Session, actor: str, subscription_id: int, cancelled_on: dt.dat
 
 
 EDITABLE_TERM_FIELDS = ("signed_date", "payment_terms", "golive_date", "golive_note", "transactional_volume",
-                        "renewal_note", "billing_period", "recent_invoice", "next_action", "notes")
+                        "renewal_note", "billing_period", "recent_invoice", "next_action", "notes", "projected_uplift")
+
+
+def projected_uplift_value(v) -> Decimal | None:
+    """A contract's Projected Renewal uplift as a fraction (0.05 = 5%), or None for the app default. Accepts a Decimal
+    / number (fraction) or blank."""
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return None
+    try:
+        d = D(v)
+    except Exception:
+        raise ServiceError(f"Projected renewal uplift must be a number, not {v!r}.") from None
+    if d is None or not d.is_finite() or not 0 <= d <= D(config.PROJECTED_UPLIFT_MAX):
+        raise ServiceError(f"Projected renewal uplift must be between 0% and {config.PROJECTED_UPLIFT_MAX:.0%}.")
+    return d.quantize(Decimal("0.0001"))
 
 
 def update_term(s: Session, actor: str, term_id: int, changes: dict, ae: str | None = None,
@@ -344,7 +358,9 @@ def update_term(s: Session, actor: str, term_id: int, changes: dict, ae: str | N
     for k, v in changes.items():
         if k not in EDITABLE_TERM_FIELDS:
             raise ServiceError(f"{k} cannot be edited here (money and dates change through Amend).")
-        if isinstance(v, str):
+        if k == "projected_uplift":
+            v = projected_uplift_value(v)
+        elif isinstance(v, str):
             v = v.strip() or None
         if getattr(t, k) != v:
             out.lines.append(f"{k}: {getattr(t, k)!r} -> {v!r}")
@@ -430,7 +446,7 @@ def delete_invoice(s: Session, actor: str, invoice_id: int) -> Outcome:
 def _term_dict(t: Term) -> dict:
     return {k: getattr(t, k) for k in ("id", "kind", "start_date", "end_date", "tcv", "term_months", "signed_date",
                                        "payment_terms", "golive_date", "golive_note", "renewal_note", "next_action",
-                                       "notes")}
+                                       "notes", "projected_uplift")}
 
 
 # ------------------------------------------------------------------------------------------------ runner

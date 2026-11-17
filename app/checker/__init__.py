@@ -78,6 +78,9 @@ RULES: dict[str, tuple[str, str, str]] = {
     "R2": ("ARR year cell: open accounting rule", "decision",
            "Depends on the ARR rule for cancellations / renewal transition years - decide, then align the sheet."),
     "R3": ("Future ARR year not filled", "info", "Future years are not filled on the sheet yet."),
+    "R4": ("ARR year cell: projected renewal", "info",
+           "The contract ended with no renewal on file; the app carries prior ARR + uplift as an estimate. The sheet "
+           "and the app agree again once the renewal is signed and recorded."),
 }
 
 

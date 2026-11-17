@@ -27,7 +27,8 @@ def term_id(Session, ref):
                                  "/customers/new", "/wf/new", "/wf/convert?customer=80008", "/import",
                                  "/import?show=all", "/audit", "/export/arr.csv",
                                  "/deferred-billing", "/deferred-billing?all=1",
-                                 "/deferred-billing?platform=CLOUD&q=nazdar"])
+                                 "/deferred-billing?platform=CLOUD&q=nazdar", "/?outcome=PROJECTED",
+                                 "/customer/80213"])
 def test_pages(client, url):
     r = client.get(url)
     assert r.status_code == 200, r.text[:400]

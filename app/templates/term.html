@@ -32,6 +32,9 @@
       <div class="field"><label>Go-live note</label><input name="golive_note" value="{{ t.golive_note or '' }}"></div>
       <div class="field"><label>Transactional volume</label><input name="transactional_volume" value="{{ t.transactional_volume or '' }}"></div>
       <div class="field"><label>Renewal outlook</label><input name="renewal_note" list="rn-list" value="{{ t.renewal_note or '' }}"></div>
+      <div class="field" id="projected"><label title="If this contract ends with no renewal on file, ARR carries it at prior ARR + this uplift (an estimate, flagged) until the renewal or a termination is recorded. Blank = the default.">Projected renewal uplift %</label>
+        <input name="projected_uplift_pct" inputmode="decimal" placeholder="default {{ '%g'|format(default_uplift * 100) }}" value="{{ '%g'|format(t.projected_uplift * 100) if t.projected_uplift is not none else '' }}">
+        {% if metrics.is_projected(t, today) %}<span class="badge b-warning" style="margin-top:4px">Projected now: {{ metrics.projected_arr(t)|money }}</span>{% endif %}</div>
       <div class="field"><label>Billing period (Y1/Y2…)</label><input name="billing_period" value="{{ t.billing_period or '' }}"></div>
       <div class="field"><label>Recent invoice</label><input name="recent_invoice" value="{{ t.recent_invoice or '' }}"></div>
       <div class="field wide"><label>Next action</label><input name="next_action" value="{{ t.next_action or '' }}" placeholder="To invoice Y3 - 8/1/2027"></div>

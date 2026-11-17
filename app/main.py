@@ -10,7 +10,7 @@ import io
 import json
 import logging
 import os
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -38,6 +38,7 @@ TODAY = None                            # tests may pin "today"
 # drive it: only these host names are served (blocks DNS rebinding) and form posts must come from the app's own pages.
 # "testserver" is the host name of Starlette's TestClient. More hosts: APP_ALLOWED_HOSTS=name1,name2 in .env.
 AUTH = auth.Settings.from_env()       # Microsoft sign-in settings (installed below, after the host check)
+config.projected_renewal_uplift()     # a bad PROJECTED_RENEWAL_UPLIFT stops the app at start, not on every page
 ALLOWED_HOSTS = ["127.0.0.1", "localhost", "[::1]", "testserver", *AUTH.allowed_hosts]
 
 
@@ -223,15 +224,22 @@ def dashboard(request: Request, platform: str = "", outcome: str = ""):
         t = today()
         maint_now = metrics.maintenance_arr_total(customers, t.year, t)
         prepaid_now = metrics.maintenance_total(customers, t.year) - maint_now
-        all_rows = metrics.renewal_worklist(customers, t, back_days=365, ahead_days=120)
-        wanted = {"OPEN": set(metrics.OPEN_OUTCOMES)}.get(outcome, {outcome} if outcome else None)
+        # every projected contract is listed under its filter, however long ago it ended (the rest: last 12 months)
+        all_rows = metrics.renewal_worklist(customers, t, back_days=36500 if outcome == "PROJECTED" else 365,
+                                            ahead_days=120)
+        wanted = {"OPEN": set(metrics.OPEN_OUTCOMES), "PROJECTED": {"OVERDUE"}}.get(outcome,
+                                                                                    {outcome} if outcome else None)
         work = [w for w in all_rows if (not platform or w.term.subscription.platform.value == platform)
-                and (not wanted or w.outcome in wanted)]
+                and (not wanted or w.outcome in wanted) and (outcome != "PROJECTED" or w.projected)]
         tally = {k: sum(1 for w in all_rows if w.outcome == k
                         and (not platform or w.term.subscription.platform.value == platform))
                  for k in metrics.OUTCOMES}
         sub_now = metrics.arr_at(customers, t)
+        projected_now, projected_n = metrics.projected_total(customers, t)
         ctx = dict(years=years, arr=metrics.arr_by_year(customers, years, t), sub_now=sub_now,
+                   projected_now=projected_now, projected_n=projected_n,
+                   projected_listed=sum(1 for _, pt in metrics.projected_terms(customers, t)
+                                        if not platform or pt.subscription.platform.value == platform),
                    maint_now=maint_now, prepaid_now=prepaid_now, arr_now=sub_now + maint_now,
                    carr_now=metrics.carr_at(customers, t) + maint_now, work=work, tally=tally,
                    f=dict(platform=platform, outcome=outcome), OUTCOMES=metrics.OUTCOMES,
@@ -352,7 +360,19 @@ def term_page(request: Request, term_id: int, msg: str = "", error: str = ""):
         for d, v in sched:
             by_year[d.year] = by_year.get(d.year, 0) + v
         return render(request, "term.html", t=t, c=t.subscription.customer, types=types, checks=checks,
-                      sched_by_year=by_year, msg=msg, error=error)
+                      sched_by_year=by_year, default_uplift=config.projected_renewal_uplift(), msg=msg,
+                      error=error)
+
+
+def _percent(raw) -> Decimal | None:
+    """'5' or '5%' -> Decimal('0.05'); blank -> None."""
+    txt = (raw or "").strip().rstrip("%").strip()
+    if not txt:
+        return None
+    try:
+        return Decimal(txt) / 100
+    except InvalidOperation:
+        raise ServiceError(f"Projected renewal uplift must be a percentage such as 5, not {raw!r}.") from None
 
 
 @app.post("/term/{term_id}/edit")
@@ -361,6 +381,8 @@ async def term_edit(request: Request, term_id: int):
     try:
         changes = {k: (_date(form, k, required=False) if k.endswith("_date") else form.get(k))
                    for k in services.EDITABLE_TERM_FIELDS if k in form}
+        if "projected_uplift_pct" in form:            # entered as a percent (5 = 5%); blank = the app default
+            changes["projected_uplift"] = _percent(form.get("projected_uplift_pct"))
         out = services.run(SESSION_FACTORY, services.update_term, actor(), term_id, changes,
                            ae=_ae_value(form), reseller=form.get("reseller"), commit=True)
     except ServiceError as e:
@@ -817,13 +839,17 @@ def export_arr():
         for c in customers:
             name = csvsafe.text(c.name)                                      # text cell: no Excel formulas
             for p in Platform:
-                vals = [cents(metrics.customer_year_arr(c, y, p, as_of=t)) for y in years]
+                vals = [cents(metrics.customer_year_arr(c, y, p, as_of=t, project=False)) for y in years]
                 if any(vals):
                     w.writerow([c.qb_number, name, p.value, *vals])
-                signed = [cents(metrics.customer_year_arr(c, y, p) - metrics.customer_year_arr(c, y, p, as_of=t))
+                signed = [cents(metrics.customer_year_arr(c, y, p)
+                                - metrics.customer_year_arr(c, y, p, as_of=t, project=False))
                           for y in years]                                  # CARR only: signed, not started
                 if any(signed):
                     w.writerow([c.qb_number, name, f"{p.value}_SIGNED_NOT_STARTED", *signed])
+                projected = [cents(metrics.customer_projected_year(c, y, p, t)) for y in years]
+                if any(projected):                         # in ARR, but an estimate: ended, renewal not yet on file
+                    w.writerow([c.qb_number, name, f"{p.value}_PROJECTED", *projected])
             vals = [cents(metrics.maintenance_arr(c, y, t)) for y in years]
             if any(vals):
                 w.writerow([c.qb_number, name, "MAINTENANCE", *vals])

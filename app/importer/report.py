@@ -55,7 +55,18 @@ def reconcile(session: Session, wb: Workbook, report: ImportReport, tolerance: f
                     subs = [s for s in (cu.subscriptions if cu else []) if s.platform == plat]
                     cancels = [metrics.cancel_date(s) for s in subs if metrics.cancel_date(s)]
                     renew_years = {ss.new_term.start_date.year for s in subs for t in s.terms for ss in t.superseded_by}
-                    if y in renew_years:
+                    projected = [t for s in subs for t in s.terms if metrics.projected_year_arr(t, y, as_of)]
+                    p_sum = float(sum(metrics.projected_arr(t) for t in projected))
+                    p_prior = float(sum(metrics.term_arr(t) for t in projected))
+                    # R4 only when the projection explains the gap: the sheet leaves the year blank (gap = projected
+                    # ARR) or carries the prior ARR by hand (gap = the uplift); any other gap is a real difference
+                    if projected and (abs(d_val - s_val - p_sum) <= tolerance
+                                      or abs(d_val - s_val - (p_sum - p_prior)) <= tolerance):
+                        terms = projected
+                        pct = ", ".join(sorted({f"{metrics.projected_uplift(t) * 100:g}%" for t in projected}))
+                        why = (f"projected renewal: the contract ended with no renewal on file, so the database "
+                               f"carries prior ARR + {pct} uplift until the renewal is recorded (an estimate)")
+                    elif y in renew_years:
                         why = ("renewal transition year: the sheet keeps the old term's ARR for this year, the "
                                "database uses the renewal's")
                     elif s_val > d_val and cancels and min(cancels).year < y:

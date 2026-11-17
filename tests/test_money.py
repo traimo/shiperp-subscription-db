@@ -123,6 +123,7 @@ def test_migration_0004_converts_existing_float_data(tmp_path, new_schema):
             "SELECT column_name, data_type FROM information_schema.columns "
             "WHERE table_schema = current_schema() AND table_name = 'term'"))}
         assert types["tcv"] == "numeric" and types["term_months"] in ("double precision", "real")
+    _alembic(engine, "head")          # the ORM model is the latest schema (0011 adds term.projected_uplift)
     S = sessionmaker(bind=engine)
     with S() as s:
         mc = s.get(MaintenanceContract, 1)

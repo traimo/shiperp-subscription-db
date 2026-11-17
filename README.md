@@ -30,6 +30,27 @@ For **future years** a signed conversion counts from signing (confirmed 2026-11-
 maintenance of a year after the current one is not ARR as soon as the conversion is signed, even before the
 subscription starts; in the current year it stops counting once the subscription is in force.
 
+## Projected Renewal (agreed 2026-11-16)
+A contract often ends before the customer signs the renewal. Rather than show that gap as churn (the workbook types the
+ARR into the current year's column by hand), the app carries the contract as a **Projected Renewal**: an estimate,
+flagged everywhere, that disappears by itself once the real renewal or a termination is recorded.
+- **Which contracts** (`metrics.is_projected`): ended before today, nothing supersedes it (no renewal/amendment), no
+  termination (whole subscription or this contract), ARR above 0, the renewal note does not say it will not renew
+  (churn, terminat…, cancel…, final period, not renewing), and not an add-on that ended while its subscription carries
+  on.
+- **Amount:** prior ARR × (1 + uplift), applied once (not compounded). The uplift is the contract's own *Projected
+  renewal uplift %* (term page, audited and undoable) or the default `PROJECTED_RENEWAL_UPLIFT` (0.05 = 5%, range
+  0–50%).
+- **When:** in ARR today from the day after the end date; in ARR by year for every year after the end year (the end year
+  already counts in full). It is **in headline ARR** and in CARR (so "Signed, not started" is unchanged), and lasts
+  until the renewal or a termination is recorded.
+- **Where it shows:** a warning line on the dashboard ("ARR includes $X of projected renewals on N contracts") and an
+  "of which projected" row under ARR by year; a **Projected** badge and the projected ARR in the renewals worklist
+  (filter *Projected renewals*); "projected renewal +5%" on the customer page with its own row under ARR by year;
+  `ON_PREM_PROJECTED` / `CLOUD_PROJECTED` rows in the ARR CSV (the `ON_PREM` / `CLOUD` rows stay signed-only); check
+  rule **R4** (info) where the workbook's ARR year cells differ because of it.
+- shiperp-dashboard computes ARR on its own from this database and does not include projections yet.
+
 ## Deferred Billing (header link, `/deferred-billing`)
 For each customer and each month-end it shows two figures:
 - **Balance** = TCV ("TCV - NN & Existing") less the amounts invoiced up to that month-end.

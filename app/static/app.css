@@ -102,3 +102,9 @@ dialog.refresh-dlg { max-width: 760px; }
 .deferred th.inv-h, .deferred td.invc { color: var(--muted); border-right: 1px solid var(--line); }
 .deferred td.invc.inv { color: var(--ink); }
 .deferred tfoot td.invc { color: var(--ink); }
+
+/* Projected Renewal: an estimate counted in ARR - always shown in the warning colour, in italics */
+a.projected-note { display: block; margin: 0 0 12px; padding: 8px 12px; border-radius: 8px; background: var(--warn-soft);
+  color: var(--ink); text-decoration: none; font-size: 13.5px; }
+a.projected-note:hover { text-decoration: underline; }
+tr.projected td, td.projected, .projected-arr { color: var(--warn); font-style: italic; }

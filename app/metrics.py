@@ -15,8 +15,10 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from . import config
 from .models import Customer, MaintenanceContract, OpenedVia, Platform, Subscription, Term, Termination, TermKind
 from .money import D, D0, ZERO, cents
+from .importer.sheet.rules import CHURN_WORDS
 from .importer.sheet.rules import months_between  # noqa: F401  (one definition; metrics.months_between is public)
 
 
@@ -101,6 +103,68 @@ def term_year_arr(t: Term, year: int, as_of: dt.date | None = None) -> Decimal:
     return term_arr(t)
 
 
+# ------------------------------------------------------------------ Projected Renewal
+# A contract that ended with no renewal or termination on file keeps its ARR, plus an uplift, as a *projected*
+# renewal: most customers renew late, so the gap is not churn. It is an estimate, flagged everywhere it is shown, and
+# it disappears by itself once the real renewal (a supersession) or a termination is recorded.
+
+def projected_uplift(t: Term) -> Decimal:
+    """The contract's own uplift, else the app default (PROJECTED_RENEWAL_UPLIFT, 5%)."""
+    return D(t.projected_uplift) if t.projected_uplift is not None else config.projected_renewal_uplift()
+
+
+def projected_arr(t: Term) -> Decimal:
+    """ARR of the Projected Renewal: the ended term's ARR plus its uplift (once, not compounded per year)."""
+    return term_arr(t) * (1 + projected_uplift(t))
+
+
+def says_not_renewing(t: Term) -> bool:
+    note = (t.renewal_note or "").lower()
+    return any(w in note for w in CHURN_WORDS)
+
+
+def is_projected(t: Term, on: dt.date | None) -> bool:
+    """True when `t` ended before `on` and nothing has replaced or ended it: no renewal/amendment superseding it, no
+    termination (whole subscription or this contract), ARR above 0, and its renewal note does not say it will not
+    renew. Only a subscription that has run out (nothing active or signed) is projected, and only its last contracts
+    (those ending with the latest open term - a base and its co-terminus add-ons): an older term that was never linked
+    to its renewal, or an add-on that ended while the subscription carried on, is not counted again."""
+    if on is None or t.end_date >= on or t.superseded_by or ended_early(t) or cancels_term(t):
+        return False
+    if term_arr(t) <= 0 or says_not_renewing(t):
+        return False
+    sub = t.subscription
+    if subscription_status(sub, on) != "ENDED":
+        return False
+    last = latest_open_term(sub)
+    return last is not None and t.end_date == last.end_date
+
+
+def projected_year_arr(t: Term, year: int, as_of: dt.date | None) -> Decimal:
+    """Projected Renewal ARR of a calendar year: every year after the term's end year (the end year itself already
+    counts in full under the calendar-year convention)."""
+    if as_of is None or year <= t.end_date.year or not is_projected(t, as_of):
+        return ZERO
+    return projected_arr(t)
+
+
+def customer_projected_year(c: Customer, year: int, platform: Platform | None, as_of: dt.date | None) -> Decimal:
+    return sum((projected_year_arr(t, year, as_of) for s in c.subscriptions if platform is None or s.platform == platform
+               for t in s.terms), ZERO)
+
+
+def projected_terms(customers: list[Customer], on: dt.date) -> list[tuple[Customer, Term]]:
+    """Every contract with a Projected Renewal on `on`, oldest end date first."""
+    out = [(c, t) for c in customers for s in c.subscriptions for t in s.terms if is_projected(t, on)]
+    return sorted(out, key=lambda ct: (ct[1].end_date, ct[0].qb_number))
+
+
+def projected_total(customers: list[Customer], on: dt.date) -> tuple[Decimal, int]:
+    """(projected ARR on `on`, number of contracts) - the part of ARR that is an estimate."""
+    terms = projected_terms(customers, on)
+    return sum((projected_arr(t) for _, t in terms), ZERO), len(terms)
+
+
 def is_live(t: Term, on: dt.date) -> bool:
     return term_status(t, on) == "ACTIVE" and term_arr(t) > 0
 
@@ -141,9 +205,12 @@ def load_customer(session: Session, qb: int) -> Customer | None:
 
 
 def customer_year_arr(c: Customer, year: int, platform: Platform | None = None,
-                      as_of: dt.date | None = None) -> Decimal:
-    return sum((term_year_arr(t, year, as_of) for s in c.subscriptions if platform is None or s.platform == platform
-               for t in s.terms), ZERO)
+                      as_of: dt.date | None = None, project: bool = True) -> Decimal:
+    """Subscription ARR of a year. With as_of (the ARR view) it includes Projected Renewals unless project=False;
+    as_of None is the contracted view (signed terms only)."""
+    signed = sum((term_year_arr(t, year, as_of) for s in c.subscriptions if platform is None or s.platform == platform
+                  for t in s.terms), ZERO)
+    return signed + (customer_projected_year(c, year, platform, as_of) if project and as_of else ZERO)
 
 
 def maintenance_year_arr(c: Customer, year: int) -> Decimal:
@@ -164,7 +231,7 @@ def maintenance_arr(c: Customer, year: int, as_of: dt.date | None = None) -> Dec
     stops counting once the subscription is in force (point in time)."""
     if is_converted(c):
         future = as_of is not None and year > as_of.year
-        if customer_year_arr(c, year, as_of=None if future else as_of) > 0:
+        if customer_year_arr(c, year, as_of=None if future else as_of, project=False) > 0:
             return ZERO
     return maintenance_year_arr(c, year)
 
@@ -180,9 +247,10 @@ def effective_year_arr(c: Customer, year: int, as_of: dt.date | None = None) -> 
     return customer_year_arr(c, year, as_of=as_of) + maintenance_arr(c, year, as_of)
 
 
-def carr_year(c: Customer, year: int) -> Decimal:
-    """Contracted ARR (CARR) of a calendar year: every signed term, started or not (+ maintenance ARR)."""
-    return effective_year_arr(c, year, None)
+def carr_year(c: Customer, year: int, on: dt.date | None = None) -> Decimal:
+    """Contracted ARR (CARR) of a calendar year: every signed term, started or not (+ maintenance ARR). With `on`,
+    Projected Renewals on that date are included too, as they are in ARR, so CARR - ARR stays "signed, not started"."""
+    return effective_year_arr(c, year, None) + (customer_projected_year(c, year, None, on) if on else ZERO)
 
 
 def year_range(session: Session) -> list[int]:
@@ -200,15 +268,16 @@ def arr_by_year(customers: list[Customer], years: list[int],
     force on as_of; signed-but-not-started terms are CARR ("Signed, not started", "CARR" rows - not in Total).
     Unlike the workbook's spec 5.1, a converted customer's prepaid maintenance is not ARR (shown separately)."""
     out = {"On-Prem": {}, "Cloud": {}, "Subscription": {}, "Maintenance": {}, "Total": {},
-           "Converted maintenance": {}, "Signed, not started": {}, "CARR": {}}
+           "Projected renewal": {}, "Converted maintenance": {}, "Signed, not started": {}, "CARR": {}}
     for y in years:
         op = sum((customer_year_arr(c, y, Platform.ON_PREM, as_of) for c in customers), ZERO)
         cl = sum((customer_year_arr(c, y, Platform.CLOUD, as_of) for c in customers), ZERO)
         mt = maintenance_arr_total(customers, y, as_of)
         out["On-Prem"][y], out["Cloud"][y], out["Subscription"][y] = op, cl, op + cl
         out["Maintenance"][y], out["Total"][y] = mt, op + cl + mt
+        out["Projected renewal"][y] = sum((customer_projected_year(c, y, None, as_of) for c in customers), ZERO)
         out["Converted maintenance"][y] = sum((converted_maintenance(c, y, as_of) for c in customers), ZERO)
-        carr = sum((carr_year(c, y) for c in customers), ZERO) if as_of is not None else op + cl + mt
+        carr = sum((carr_year(c, y, as_of) for c in customers), ZERO) if as_of is not None else op + cl + mt
         out["CARR"][y], out["Signed, not started"][y] = carr, cents(carr - (op + cl + mt)) or ZERO  # no -0.00
     return out
 
@@ -224,7 +293,9 @@ def maintenance_arr_total(customers: list[Customer], year: int, as_of: dt.date |
 
 
 def arr_at(customers: list[Customer], on: dt.date) -> Decimal:
-    return sum((term_arr(t) for c in customers for s in c.subscriptions for t in s.terms if is_live(t, on)), ZERO)
+    """Subscription ARR in force on `on`, including Projected Renewals (see projected_total for that part)."""
+    live = sum((term_arr(t) for c in customers for s in c.subscriptions for t in s.terms if is_live(t, on)), ZERO)
+    return live + projected_total(customers, on)[0]
 
 
 def carr_at(customers: list[Customer], on: dt.date) -> Decimal:
@@ -311,6 +382,7 @@ class WorkRow:
     outcome: str
     successors: list[Term]
     cancelled_on: dt.date | None
+    projected: bool = False       # overdue and carried in ARR as a Projected Renewal (see is_projected)
 
     @property
     def renewal_date(self) -> dt.date:
@@ -354,7 +426,8 @@ def renewal_worklist(customers: list[Customer], on: dt.date, back_days: int = 36
                 if outcomes and outcome not in outcomes:
                     continue
                 out.append(WorkRow(t, c, (rd - on).days, outcome, successors,
-                                   cancel_date(s) if outcome == "NOT_RENEWING" else None))
+                                   cancel_date(s) if outcome == "NOT_RENEWING" else None,
+                                   outcome == "OVERDUE" and is_projected(t, on)))
     return sorted(out, key=lambda w: (not w.is_open, w.days))
 
 

@@ -73,6 +73,23 @@ def data_mount_problem() -> str | None:
     return None
 
 
+PROJECTED_UPLIFT_MAX = 0.5      # same ceiling as the maintenance annual roll
+
+
+def projected_renewal_uplift():
+    """The default uplift of a Projected Renewal (PROJECTED_RENEWAL_UPLIFT, a fraction: 0.05 = 5%), as a Decimal.
+    A contract's own `projected_uplift` overrides it."""
+    from decimal import Decimal, InvalidOperation
+    raw = os.environ.get("PROJECTED_RENEWAL_UPLIFT", "").strip() or "0.05"
+    try:
+        v = Decimal(raw)
+    except InvalidOperation:
+        raise ConfigError(f"PROJECTED_RENEWAL_UPLIFT must be a fraction such as 0.05 (5%), not {raw!r}") from None
+    if not 0 <= v <= Decimal(str(PROJECTED_UPLIFT_MAX)):
+        raise ConfigError(f"PROJECTED_RENEWAL_UPLIFT must be between 0 and {PROJECTED_UPLIFT_MAX} (got {raw})")
+    return v
+
+
 def maintenance_workbook() -> Path | None:
     """The maintenance workbook in data/source (optional)."""
     files = sorted(p for p in SOURCE_DIR.glob("*Maintenance*.xlsx") if not p.name.startswith("~$"))

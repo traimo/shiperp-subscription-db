@@ -98,7 +98,9 @@ def _recon_issue(d: dict, wb: Workbook) -> Issue | None:
     tab = wb.tabs[TAB_KEY[d["platform"]]]
     year, qb = int(d["year"]), int(d["customer"])
     why = d.get("why") or ""
-    if "transition" in why or "cancellation" in why:
+    if why.startswith("projected renewal"):
+        rule = "R4"
+    elif "transition" in why or "cancellation" in why:
         rule = "R2"
     elif d.get("future"):
         rule = "R3"
