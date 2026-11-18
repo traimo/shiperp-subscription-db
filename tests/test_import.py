@@ -117,13 +117,18 @@ def test_maintenance_reconciles_and_company_arr(imported):
     with Session() as s:
         cs = metrics.load_customers(s)
         arr = metrics.arr_by_year(cs, [2025, 2026])
-        assert 9.8e6 < arr["Total"][2026] < 10.0e6            # accounting's ~10.2M minus converted prepaid maintenance
+        assert 10.0e6 < arr["Total"][2026] < 10.4e6           # accounting's ~10.2M: every customer's maintenance
         assert arr["Total"][2026] == arr["Subscription"][2026] + arr["Maintenance"][2026]
-        assert 0 < arr["Converted maintenance"][2026] < 0.4e6
-        assert (arr["Maintenance"][2026] + arr["Converted maintenance"][2026]
-                == metrics.maintenance_total(cs, 2026))            # ties back to the workbook GRAND TOTAL
+        assert "Converted maintenance" not in arr
+        assert arr["Maintenance"][2026] == metrics.maintenance_total(cs, 2026)   # the workbook GRAND TOTAL
+        assert abs(float(arr["Maintenance"][2026]) - 3251918.03) < 0.01
         conv = next(c for c in cs if c.qb_number == 80095)     # KTM: converted perpetual -> subscription
         assert metrics.is_converted(conv) and conv.maintenance_contracts
+        # License Category / Hybrid class per customer: Hybrid when any row says so
+        hybrid = {c.qb_number: c.hybrid_class for c in cs if c.license_category == "Hybrid"}
+        assert len(hybrid) == 16 and hybrid[80023] == "Perpetual/On Prem" and hybrid[80131] == "On Prem/Cloud"
+        assert conv.license_category == "On Premise" and conv.hybrid_class is None
+        assert next(c for c in cs if c.qb_number == 80023).has_perpetual_license
 
 
 def test_customer_names_from_contracts(imported):

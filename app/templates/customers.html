@@ -11,11 +11,12 @@
 </form>
 <div class="table-wrap">
 <table>
-  <thead><tr><th>Number</th><th>Name</th><th>Platforms</th><th>Status</th><th class="num">ARR {{ today.year }} (incl. maintenance)</th></tr></thead>
+  <thead><tr><th>Number</th><th>Name</th><th>Platforms</th><th>Category</th><th>Status</th><th class="num">ARR {{ today.year }} (incl. maintenance)</th></tr></thead>
   <tbody>
   {% for c, st, arr, plats in rows %}
   <tr><td><a href="/customer/{{ c.qb_number }}">{{ c.qb_number }}</a></td><td>{{ c.name }}</td>
     <td>{{ plats|join(', ') }}</td>
+    <td>{% if c.license_category == 'Hybrid' %}<span class="badge b-info" title="Subscription next to perpetual maintenance - both count as ARR">Hybrid</span>{% else %}<span class="muted">{{ c.license_category or '' }}</span>{% endif %}</td>
     <td><span class="badge {{ {'ACTIVE':'b-ok','ENDING':'b-warning','CHURNED':'b-error','ENDED':'b-muted'}.get(st, 'b-info') }}">{{ st }}</span></td>
     <td class="num">{{ arr|money if arr else '' }}</td></tr>
   {% endfor %}

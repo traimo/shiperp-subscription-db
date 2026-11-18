@@ -22,7 +22,6 @@ from sqlalchemy import or_, select
 from . import auth, config, csvsafe, deferred, metrics, services
 from .db import SessionLocal
 from .money import D, D0, ZERO, cents
-from .importer.sheet.rules import HYBRID_CLASS
 from .models import (AccountExec, AuditLog, CheckResult, ControlCheckType, Customer, NonRecurringFee, OpenedVia,
                      Platform, Subscription, Term, TerminationReason, TermKind)
 from .services import ServiceError, TermInput
@@ -198,7 +197,7 @@ def _ae_list() -> list[str]:
         return list(s.scalars(select(AccountExec.initials).order_by(AccountExec.initials)))
 
 
-templates.env.globals.update(ae_list=_ae_list, HYBRID_CLASSES=HYBRID_CLASS)
+templates.env.globals.update(ae_list=_ae_list)
 
 
 def term_input(form) -> TermInput:
@@ -222,8 +221,7 @@ def dashboard(request: Request, platform: str = "", outcome: str = ""):
         customers = metrics.load_customers(s)
         years = [y for y in metrics.year_range(s) if y >= 2020]
         t = today()
-        maint_now = metrics.maintenance_arr_total(customers, t.year, t)
-        prepaid_now = metrics.maintenance_total(customers, t.year) - maint_now
+        maint_now = metrics.maintenance_total(customers, t.year)
         # every projected contract is listed under its filter, however long ago it ended (the rest: last 12 months)
         all_rows = metrics.renewal_worklist(customers, t, back_days=36500 if outcome == "PROJECTED" else 365,
                                             ahead_days=120)
@@ -240,7 +238,7 @@ def dashboard(request: Request, platform: str = "", outcome: str = ""):
                    projected_now=projected_now, projected_n=projected_n,
                    projected_listed=sum(1 for _, pt in metrics.projected_terms(customers, t)
                                         if not platform or pt.subscription.platform.value == platform),
-                   maint_now=maint_now, prepaid_now=prepaid_now, arr_now=sub_now + maint_now,
+                   maint_now=maint_now, arr_now=sub_now + maint_now,
                    carr_now=metrics.carr_at(customers, t) + maint_now, work=work, tally=tally,
                    f=dict(platform=platform, outcome=outcome), OUTCOMES=metrics.OUTCOMES,
                    retention=[metrics.retention(customers, y, t) for y in (t.year - 1, t.year)],
@@ -271,7 +269,7 @@ def customers_page(request: Request, q: str = "", status: str = "", platform: st
                 continue
             plats = [x.platform.value for x in subs] + (["MAINTENANCE"] if maint > 0 and not platform else [])
             rows.append((c, cstat, metrics.customer_year_arr(c, t.year, as_of=t)
-                         + (0 if platform else metrics.maintenance_arr(c, t.year, t)), plats))
+                         + (0 if platform else metrics.maintenance_year_arr(c, t.year)), plats))
         return render(request, "customers.html", rows=rows, f=dict(q=q, status=status, platform=platform))
 
 
@@ -496,20 +494,14 @@ def wf_form(request: Request, kind: str, customer: int | None = None, subscripti
 def _dispatch(kind: str, form, commit: bool):
     a = actor()
     if kind == "convert":
-        # a conversion replaces the perpetual licence; keeping it and adding a subscription (hybrid) is a New subscription
-        if form.get("hybrid_class") or (form.get("license_category") or "").strip().lower() == "hybrid":
-            raise ServiceError("A conversion replaces the perpetual licence. To keep the perpetual licence and add a "
-                               "subscription (hybrid), use New subscription instead.")
         from . import maintenance_services as ms
         return services.run(SESSION_FACTORY, ms.convert_to_subscription, a, int(form.get("customer")),
                             Platform(form.get("platform")), term_input(form),
-                            [int(x) for x in form.getlist("stop_line")], form.get("license_category") or None,
-                            today=today(), commit=commit)
+                            [int(x) for x in form.getlist("stop_line")], today=today(), commit=commit)
     if kind == "new":
         return services.run(SESSION_FACTORY, services.new_subscription, a, int(form.get("customer")),
                             Platform(form.get("platform")),
                             OpenedVia.NET_NEW if kind == "new" else OpenedVia.CONVERSION, term_input(form),
-                            form.get("license_category") or None, form.get("hybrid_class") or None,
                             today=today(), commit=commit)
     if kind == "addon":
         return services.run(SESSION_FACTORY, services.add_on, a, int(form.get("subscription")), term_input(form),
@@ -850,12 +842,9 @@ def export_arr():
                 projected = [cents(metrics.customer_projected_year(c, y, p, t)) for y in years]
                 if any(projected):                         # in ARR, but an estimate: ended, renewal not yet on file
                     w.writerow([c.qb_number, name, f"{p.value}_PROJECTED", *projected])
-            vals = [cents(metrics.maintenance_arr(c, y, t)) for y in years]
+            vals = [cents(metrics.maintenance_year_arr(c, y)) for y in years]
             if any(vals):
                 w.writerow([c.qb_number, name, "MAINTENANCE", *vals])
-            vals = [cents(metrics.converted_maintenance(c, y, t)) for y in years]  # billed, not ARR
-            if any(vals):
-                w.writerow([c.qb_number, name, "MAINTENANCE_PREPAID_CONVERTED", *vals])
         buf.seek(0)
         return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
                                  headers={"Content-Disposition": "attachment; filename=arr_by_year.csv"})

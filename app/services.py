@@ -155,7 +155,6 @@ def create_customer(s: Session, actor: str, qb: int, name: str) -> Outcome:
 
 
 def new_subscription(s: Session, actor: str, qb: int, platform: Platform, opened_via: OpenedVia, inp: TermInput,
-                     license_category: str | None = None, hybrid_class: str | None = None,
                      today: dt.date | None = None) -> Outcome:
     today = today or dt.date.today()
     c = get_customer(s, qb)
@@ -168,9 +167,7 @@ def new_subscription(s: Session, actor: str, qb: int, platform: Platform, opened
     if opened_via == OpenedVia.NET_NEW and any(x.terms for x in c.subscriptions):
         out.warnings.append("Customer had subscriptions before - this counts as a new logo / re-activation, "
                             "not as a new customer for CAC.")
-    sub = Subscription(customer=c, platform=platform, opened_via=opened_via,
-                       license_category=license_category or ("On Premise" if platform == Platform.ON_PREM else "Cloud"),
-                       hybrid_class=hybrid_class)
+    sub = Subscription(customer=c, platform=platform, opened_via=opened_via)
     s.add(sub)
     kind = TermKind.INITIAL if opened_via == OpenedVia.NET_NEW else TermKind.CONVERSION
     t = _new_term(s, sub, kind, inp)

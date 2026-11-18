@@ -126,7 +126,7 @@ def test_checks_invoices_and_edit(blank):
         assert t.checks[0].result == CheckResult.MISMATCHED and t.ae.initials == "AC"
 
 
-def test_maintenance_and_conversion_rule(blank):
+def test_maintenance_counts_for_every_customer(blank):
     from app.models import Customer, MaintenanceBlock, MaintenanceContract, MaintenanceFee, OpenedVia
     seed(blank)
     with blank() as s:
@@ -140,18 +140,14 @@ def test_maintenance_and_conversion_rule(blank):
         c = metrics.load_customers(s)[0]
         assert metrics.maintenance_year_arr(c, 2026) == 5200
         assert metrics.arr_by_year([c], [2026])["Total"][2026] == 12000 + 5200
-        assert metrics.effective_year_arr(c, 2026) == 17200           # not converted: both count
-        assert metrics.maintenance_arr(c, 2026) == 5200 and metrics.converted_maintenance(c, 2026) == 0
+        assert metrics.effective_year_arr(c, 2026) == 17200           # both count
         c.subscriptions[0].opened_via = OpenedVia.CONVERSION
-        assert metrics.effective_year_arr(c, 2026) == 12000           # converted: subscription replaces maintenance
-        assert metrics.maintenance_arr(c, 2026) == 0                  # prepaid leftover is not ARR ...
-        assert metrics.converted_maintenance(c, 2026) == 5200         # ... but is still billed, shown separately
+        assert metrics.effective_year_arr(c, 2026) == 17200           # a converted / Hybrid customer too (2026-11-18)
         arr = metrics.arr_by_year([c], [2026])
-        assert arr["Total"][2026] == 12000 and arr["Maintenance"][2026] == 0
-        assert arr["Converted maintenance"][2026] == 5200
-        assert metrics.maintenance_total([c], 2026) == 5200 and metrics.maintenance_arr_total([c], 2026) == 0
-        assert metrics.maintenance_arr(c, 2025) == 0                  # subscription in 2025 too
-        assert metrics.customer_year_arr(c, 2027) == 0 and metrics.maintenance_arr(c, 2027) == 300   # none: counts
+        assert arr["Total"][2026] == 17200 and arr["Maintenance"][2026] == 5200
+        assert "Converted maintenance" not in arr
+        assert metrics.maintenance_total([c], 2026) == 5200
+        assert metrics.customer_year_arr(c, 2027) == 0 and metrics.effective_year_arr(c, 2027) == 300
 
 
 def test_overdue_renewal(blank):

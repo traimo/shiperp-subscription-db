@@ -9,7 +9,7 @@
   </div>
 {%- endmacro %}
 <h1>{{ c.qb_number }} · {{ c.name }}</h1>
-<p class="sub">{% if c.maintenance_contracts %}<span class="badge b-info">maintenance</span> {% endif %}{% if c.has_perpetual_license %}<span class="badge b-info">perpetual licence holder</span> {% endif %}{{ c.subscriptions|length }} subscription(s){% if c.notes %} · <span class="mismatch">{{ c.notes }}</span>{% endif %}</p>
+<p class="sub">{% if c.maintenance_contracts %}<span class="badge b-info">maintenance</span> {% endif %}{% if c.has_perpetual_license %}<span class="badge b-info">perpetual licence holder</span> {% endif %}{% if c.license_category == 'Hybrid' %}<span class="badge b-info" title="License Category Hybrid: an active subscription next to perpetual maintenance - both count as ARR">Hybrid{% if c.hybrid_class and c.hybrid_class != 'n/a' %} · {{ c.hybrid_class }}{% endif %}</span> {% elif c.license_category %}<span class="badge b-muted">{{ c.license_category }}</span> {% endif %}{{ c.subscriptions|length }} subscription(s){% if c.notes %} · <span class="mismatch">{{ c.notes }}</span>{% endif %}</p>
 {% if msg %}<div class="alert ok">{{ msg }}</div>{% endif %}
 {% if error %}<div class="alert err">{{ error }}</div>{% endif %}
 <div class="actions" style="margin-bottom:16px">
@@ -26,8 +26,7 @@
     <span class="badge {{ {'ACTIVE':'b-ok','CHURNED':'b-error','ENDING':'b-warning'}.get(st, 'b-muted') }}">{{ st }}</span>
     {% set overdue = metrics.renewal_overdue(sub, today) %}{% set last = metrics.latest_open_term(sub) %}
     {% if overdue %}<span class="badge b-error">renewal overdue — ended {{ last.end_date|fdate }}</span>{% endif %}
-    <span class="badge b-muted">opened via {{ sub.opened_via.value }}</span>
-    {% if sub.license_category %}<span class="muted" style="font-weight:400">· {{ sub.license_category }}{% if sub.hybrid_class and sub.hybrid_class != 'n/a' %} ({{ sub.hybrid_class }}){% endif %}</span>{% endif %}</h2>
+    <span class="badge b-muted">opened via {{ sub.opened_via.value }}</span></h2>
   <table>
     <tr><th>Term</th><th>Kind</th><th>Period</th><th class="num">TCV</th><th class="num">Months</th><th class="num">ARR</th><th>Status</th><th>Supersedes / superseded by</th><th>Sheet ref</th><th>Docs</th><th></th></tr>
     {% for t in sub.terms %}
@@ -71,7 +70,7 @@
 
 {% if c.maintenance_contracts %}
 <div class="panel" id="maintenance">
-  <h2 style="margin-top:0">Maintenance (perpetual licence){% if metrics.is_converted(c) %} <span class="badge b-info">converted - prepaid maintenance excluded from ARR once the subscription starts</span>{% endif %}
+  <h2 style="margin-top:0">Maintenance (perpetual licence){% if metrics.is_converted(c) %} <span class="badge b-info">converted from perpetual</span>{% endif %}
     <a class="btn small" href="/maintenance/wf/new?customer={{ c.qb_number }}" style="float:right">New perpetual licence</a></h2>
   <div class="table-wrap" style="max-height:none">
   <table>
@@ -119,7 +118,6 @@
     {% endif %}
     {% endfor %}{% endfor %}
     {% if c.maintenance_contracts %}<tr><td>Maintenance</td>{% for y in years %}{% set v = metrics.maintenance_year_arr(c, y) %}<td class="num {{ 'zero' if not v }}">{{ v|money if v else '–' }}</td>{% endfor %}</tr>{% endif %}
-    {% if metrics.is_converted(c) %}<tr class="muted"><td>of which prepaid (converted, not ARR)</td>{% for y in years %}{% set v = metrics.converted_maintenance(c, y, today) %}<td class="num {{ 'zero' if not v }}">{{ ('−' ~ (v|money)) if v else '–' }}</td>{% endfor %}</tr>{% endif %}
     <tr><td><b>Customer ARR</b></td>{% for y in years %}{% set v = metrics.effective_year_arr(c, y, today) %}<td class="num"><b>{{ v|money if v else '–' }}</b></td>{% endfor %}</tr>
     {% set ns = namespace(diff=false) %}{% for y in years %}{% if metrics.carr_year(c, y, today) != metrics.effective_year_arr(c, y, today) %}{% set ns.diff = true %}{% endif %}{% endfor %}
     {% if ns.diff %}<tr><td title="Contracted ARR: ARR + contracts signed but not started">Customer CARR</td>{% for y in years %}{% set v = metrics.carr_year(c, y, today) %}<td class="num">{{ v|money if v else '–' }}</td>{% endfor %}</tr>{% endif %}

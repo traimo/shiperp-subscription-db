@@ -174,7 +174,8 @@ Reading rules (the dashboard's; keep them if the UI writes the sheet):
   starts = **conversion** (not churn); a customer with both lines losing one = partial churn.
 - **Conversion detection**: a customer is converted when its Subscription Summary label contains "convert", or when
   maintenance > 0 in some year and subscription ARR starts in that or a later year while maintenance is ≤ 0 that
-  year or the next. Once converted, only the subscription counts as the customer's effective ARR.
+  year or the next. In this app both lines count as ARR while they are billed (Hybrid account, 2026-11-18); the
+  dashboard's cohort still replaces the maintenance by the subscription once it starts.
 - **Conversion tracker** (Customers tab): maintenance-only customers and ARR remaining per year, conversions per year.
 - **Reconciliation** (ARR bridge tab): walks from the tile (GRAND TOTAL) to the cohort basis: maintenance of
   converted customers, maintenance on rows the parser does not key to a customer, explicit-zero stops.
@@ -232,7 +233,9 @@ Cloud source it is a Cloud new logo and an On-Prem maintenance churn.
 
 ### 6.8 Hybrid: subscription customer still paying some maintenance
 Customers in the subscription blocks whose year cells carry values (e.g. a perpetual licence kept for one site, a
-subscription for the rest). Both lines count; the maintenance line is judged separately for partial churn.
+subscription for the rest). Both lines count as ARR (the Subscription Summary marks them `License Category = Hybrid`,
+stored per customer; check X07 flags a Hybrid customer with a perpetual class and no maintenance billed); the
+maintenance line is judged separately for partial churn.
 
 ### 6.9 Termination / churn (block "CLOSED ACCOUNTS/TERMINATED/CHURN")
 The row is moved to the closed block, the Product cell receives the termination note and date, the first unbilled

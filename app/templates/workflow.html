@@ -39,13 +39,9 @@
         <select name="customer" required>{% for cu in customers %}<option value="{{ cu.qb_number }}" {{ 'selected' if (c and c.qb_number == cu.qb_number) or (pre.customer|string == cu.qb_number|string) }}>{{ cu.qb_number }} · {{ cu.name }}</option>{% endfor %}</select>
         <span class="muted" style="font-size:12px">Not listed? <a href="/customers/new">Add the customer</a> first.</span></div>
       <div class="field"><label>Platform</label><select name="platform">{% for p in Platform %}<option value="{{ p.value }}" {{ 'selected' if pre.platform == p.value }}>{{ p.value }}</option>{% endfor %}</select></div>
-      {% if kind == 'new' %}
-      <div class="field"><label>License category</label><input name="license_category" list="lc-list" value="{{ pre.license_category or '' }}" placeholder="default from platform"></div>
-      <div class="field"><label>Hybrid class</label><select name="hybrid_class"><option value=""></option>{% for h in HYBRID_CLASSES %}<option value="{{ h }}" {{ 'selected' if pre.hybrid_class == h }}>{{ h }}</option>{% endfor %}{% if pre.hybrid_class and pre.hybrid_class not in HYBRID_CLASSES %}<option value="{{ pre.hybrid_class }}" selected>{{ pre.hybrid_class }}</option>{% endif %}</select></div>
-      {% endif %}
     </div>
     {% if kind == 'convert' %}
-    <p class="muted" style="margin:10px 0 0">A conversion <b>replaces</b> the perpetual licence with a subscription. Keeping the perpetual licence and adding a subscription (hybrid)? Use <a href="/wf/new{{ '?customer=%d'|format(c.qb_number) if c }}">New subscription</a> instead.</p>
+    <p class="muted" style="margin:10px 0 0">A conversion <b>replaces</b> the perpetual licence with a subscription. Keeping the perpetual licence (and its maintenance) next to a subscription makes the account <b>Hybrid</b> on the workbook: record that as a <a href="/wf/new{{ '?customer=%d'|format(c.qb_number) if c }}">New subscription</a> and leave the maintenance line running.</p>
     {% if maint_lines %}
     <h2>Maintenance (perpetual licence)</h2>
     <p class="muted" style="margin-top:0">Ticked lines are converted too: maintenance is stopped (explicit 0) from the first contract year starting on or after the subscription start date. The current year stays billed.</p>
@@ -115,5 +111,4 @@
   <p class="actions" style="margin-top:16px"><button class="btn primary">Review change</button> <a class="btn" href="{{ '/customer/%d'|format(c.qb_number) if c else '/' }}">Cancel</a></p>
 </form>
 <datalist id="rs-list"><option value="NTT"><option value="Mehrwerk"><option value="Netgo"></datalist>
-<datalist id="lc-list"><option value="On Premise"><option value="Cloud"><option value="Hybrid"></datalist>
 {% endblock %}

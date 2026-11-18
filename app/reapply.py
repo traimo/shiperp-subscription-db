@@ -156,7 +156,7 @@ def _create_term(a, os_, ns, today):
     sub = old.subscription
     if old.kind in (TermKind.INITIAL, TermKind.CONVERSION):
         return services.new_subscription, (_qb(old), sub.platform, sub.opened_via, term_input(old)), \
-            dict(license_category=sub.license_category, hybrid_class=sub.hybrid_class, today=today)
+            dict(today=today)
     new_sub = map_subscription(sub, ns)
     if new_sub is None:
         raise Manual(f"Could not find the {sub.platform.value} subscription of {_qb(old)} for this add-on.")

@@ -177,6 +177,7 @@ class Mapper:
                                                        for s in "ABCDE"}
             self.map_tab(tab)
         self.apply_contract_names()
+        self.apply_license_category()
         self.s.flush()
 
     def apply_contract_names(self):
@@ -228,6 +229,41 @@ class Mapper:
             for c in rows:
                 if c.section == "E":
                     self.map_termination(tab, c)
+
+    def apply_license_category(self):
+        """License Category / Hybrid class are stored per customer: Hybrid when any contract row (either tab) says
+        so, else the most recent row's value. Rows that disagree are a sheet error the checker reports (X08), not an
+        import decision. A Hybrid customer with a perpetual class holds a perpetual licence."""
+        rows: dict[int, list[ContractRow]] = defaultdict(list)
+        for t in self.wb.tabs.values():
+            for c in t.contracts:
+                if c.section != "E":
+                    rows[c.customer_number].append(c)
+
+        def latest(rs: list[ContractRow]) -> ContractRow:
+            return max(rs, key=lambda c: (rules.parse_date(c.values.get("signed_date")) or dt.date.min,
+                                          c.period.start or dt.date.min, c.row))
+
+        def hybrid_class(c: ContractRow) -> str | None:
+            v = str(c.values.get("hybrid_class") or "").strip()
+            return v if v and v.lower() != "n/a" else None
+
+        for number, rs in rows.items():
+            cust = self.customers.get(number)
+            if cust is None:
+                continue
+            hybrid = [c for c in rs if rules.is_hybrid(c.values.get("license_category"))]
+            if hybrid:
+                cust.license_category = "Hybrid"
+                classed = [c for c in hybrid if hybrid_class(c)]
+                raw = hybrid_class(latest(classed)) if classed else None
+                cust.hybrid_class = (rules.canonical_hybrid_class(raw) or _text(raw, 60)) if raw else None
+                if "perpetual" in (cust.hybrid_class or "").lower():
+                    cust.has_perpetual_license = True
+            else:
+                named = [c for c in rs if str(c.values.get("license_category") or "").strip()]
+                cust.license_category = _text(latest(named).values.get("license_category"), 40) if named else None
+                cust.hybrid_class = None
 
     # ------------------------------------------------------------------ rows -> terms
     def map_customer(self, tab, number: int, rows: list[ContractRow]):
@@ -314,9 +350,7 @@ class Mapper:
             current.terms else False
         if current is None or reopened:
             opened = OpenedVia.CONVERSION if c.section == "B" else OpenedVia.NET_NEW
-            sub = Subscription(customer=cust, platform=PLATFORM[tab.key], opened_via=opened,
-                               license_category=_text(c.values.get("license_category"), 40),
-                               hybrid_class=_text(c.values.get("hybrid_class"), 60))
+            sub = Subscription(customer=cust, platform=PLATFORM[tab.key], opened_via=opened)
             self.s.add(sub)
             subs.append(sub)
             if c.section in "CD":

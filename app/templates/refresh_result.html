@@ -17,7 +17,7 @@
     <td>{{ b|money if b is not integer else b }}</td><td>{{ a|money if a is not integer else a }}</td>
     <td class="{{ 'delta-up' if d > 0 else 'delta-down' if d < 0 else 'zero' }}">{% if d %}{{ '+' if d > 0 }}{{ d|money if d is not integer else d }}{% else %}-{% endif %}</td></tr>{% endfor %}
   </table>
-  <p class="muted" style="margin-bottom:0">Same figures as the <a href="/">dashboard</a> (converted prepaid maintenance excluded; CARR includes signed, not started).</p>
+  <p class="muted" style="margin-bottom:0">Same figures as the <a href="/">dashboard</a> (CARR includes signed, not started).</p>
 </div>
 <div class="panel"><h2 style="margin-top:0">Workbooks</h2>
   <table>{% for f in r.files %}<tr><td>{{ f.name }}</td><td style="white-space:nowrap">{{ (f.modified or '').replace('T', ' ') }}{% if f.modified_by %} by {{ f.modified_by }}{% endif %}</td></tr>{% endfor %}</table>

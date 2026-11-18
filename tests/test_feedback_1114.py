@@ -96,9 +96,10 @@ def test_terminate_form_and_partial_reapply(env):
 # ------------------------------------------------------------------------------------------------ conversion
 
 @needs_source
-def test_conversion_stops_maintenance_and_future_maintenance_is_not_arr(env):
-    """Belimo: conversion signed 11/13/2026, starts 12/01/2026. 2027 maintenance is not ARR right away; 2026 stops
-    counting once the subscription has started. The maintenance line is converted in the same step."""
+def test_conversion_stops_maintenance_from_the_next_contract_year(env):
+    """Belimo: conversion signed 11/13/2026, starts 12/01/2026. The maintenance line is converted in the same step:
+    explicit 0 from the first contract year starting on/after 12/01/2026; what is still billed stays ARR (a Hybrid
+    account counts both, 2026-11-18)."""
     S, eng, paths = env
     with S() as s:
         lines = [mc.id for mc in s.scalars(select(MaintenanceContract).join(Customer)
@@ -113,11 +114,12 @@ def test_conversion_stops_maintenance_and_future_maintenance_is_not_arr(env):
     with S() as s:
         c = cust(s, 80018)
         assert all(mc.ended_on == D(2026, 12, 1) for mc in c.maintenance_contracts if mc.id in lines)
-        assert metrics.maintenance_arr(c, 2027, TODAY) == 0                  # future year: not ARR from signing
-        assert metrics.maintenance_arr(c, 2026, TODAY) == m26                # current year: until it starts
-        assert metrics.maintenance_arr(c, 2026, D(2026, 12, 15)) == 0
+        assert metrics.maintenance_year_arr(c, 2027) == m27                  # 2026-2027 is still billed: ARR
+        assert metrics.maintenance_year_arr(c, 2028) == 0                    # explicit 0 from 2027-2028
+        assert metrics.effective_year_arr(c, 2026, TODAY) == m26
+        assert metrics.effective_year_arr(c, 2026, D(2026, 12, 15)) == m26 + 10000
         assert metrics.customer_year_arr(c, 2027, as_of=TODAY) == 0          # the subscription itself is CARR
-        assert metrics.carr_year(c, 2027) == 10000
+        assert metrics.carr_year(c, 2027) == 10000 + m27
         rows = s.scalars(select(AuditLog).order_by(AuditLog.id.desc()).limit(1 + len(lines))).all()[::-1]
         assert [json.loads(r.detail or "{}").get("part_of") for r in rows[1:]] == [out.audit_id] * len(lines)
     run(S, undo.undo_change, out.audit_id)                                   # one Undo reverses all of it
@@ -130,16 +132,15 @@ def test_conversion_stops_maintenance_and_future_maintenance_is_not_arr(env):
 
 
 @needs_source
-def test_conversion_form_has_no_hybrid_and_refuses_it(env):
+def test_conversion_and_new_forms_have_no_hybrid_fields(env):
+    """License Category / Hybrid class come from the workbook, per customer - no form field sets them."""
     S, eng, paths = env
     client = TestClient(main.app)
     html = client.get("/wf/convert?customer=80018").text
     assert 'name="hybrid_class"' not in html and 'name="license_category"' not in html
     assert 'name="stop_line"' in html and "checked" in html
-    assert 'name="hybrid_class"' in client.get("/wf/new?customer=80018").text
-    res = client.post("/wf/convert", data={"customer": "80018", "platform": "ON_PREM", "license_category": "Hybrid",
-                                           "start_date": "2026-12-01", "end_date": "2029-11-30", "tcv": "30000"})
-    assert "use New subscription instead" in res.text
+    new = client.get("/wf/new?customer=80018").text
+    assert 'name="hybrid_class"' not in new and 'name="license_category"' not in new
 
 
 # ------------------------------------------------------------------------------------------------ forms

@@ -114,14 +114,14 @@ def test_new_subscription_signed_early_stays_signed(blank):
 
 # ------------------------------------------------------------------------------------------------ drop-downs
 
-def test_hybrid_class_and_ae_dropdowns(app_db):
+def test_ae_dropdowns(app_db):
     _, _, base = seed(app_db)
     with app_db() as s:
         s.add_all([AccountExec(initials="AC"), AccountExec(initials="JG")])
         s.commit()
     c = TestClient(main.app)
     page = c.get("/wf/new?customer=80001").text
-    assert '<select name="hybrid_class">' in page and ">Perpetual/On Prem<" in page
+    assert 'name="hybrid_class"' not in page and 'name="license_category"' not in page
     assert '<select name="ae"' in page and '<option value="JG"' in page and "Other…" in page
     assert 'name="ae_other"' in c.get(f"/term/{base}").text
     r = c.post(f"/term/{base}/edit", data={"ae": "__other__", "ae_other": "zz"}, follow_redirects=False)
@@ -173,3 +173,16 @@ def test_future_signed_renewal_does_not_leave_a_gap(blank):
         assert metrics.effective_year_arr(c, 2026, TODAY) == 12000
         assert metrics.effective_year_arr(c, 2027, TODAY) == 0          # old term ended 2026, renewal not signed yet
         assert metrics.carr_year(c, 2027) == 13200
+
+
+def test_hybrid_badge_on_customer_page_and_list(app_db):
+    from sqlalchemy import select
+    from app.models import Customer
+    seed(app_db)
+    with app_db() as s:
+        cu = s.scalar(select(Customer).where(Customer.qb_number == 80001))
+        cu.license_category, cu.hybrid_class = "Hybrid", "Perpetual/On Prem"
+        s.commit()
+    c = TestClient(main.app)
+    assert "Hybrid · Perpetual/On Prem" in c.get("/customer/80001").text
+    assert ">Hybrid</span>" in c.get("/customers").text

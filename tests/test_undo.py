@@ -195,8 +195,10 @@ def test_migration_0009_down_and_up(db):
     assert "change_record" not in inspect(eng).get_table_names()
     command.upgrade(cfg, "head")
     with eng.connect() as conn:
-        assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0011"
+        assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0012"
     assert "termination_term" in inspect(eng).get_table_names()
     assert "projected_uplift" in {c["name"] for c in inspect(eng).get_columns("term")}
+    assert {"license_category", "hybrid_class"} <= {c["name"] for c in inspect(eng).get_columns("customer")}
+    assert not {"license_category", "hybrid_class"} & {c["name"] for c in inspect(eng).get_columns("subscription")}
     cols = {c["name"] for c in inspect(eng).get_columns("audit_log")}
     assert {"undone_at", "undone_by", "undo_of_id"} <= cols

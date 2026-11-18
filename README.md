@@ -20,15 +20,17 @@ touches, except from the start year of a term that supersedes it and after its s
 
 ## Company ARR
 ARR(year) = subscription ARR + maintenance fees of the maintenance year **ending** in that year ("2025-2026" -> 2026),
-**except** a converted customer's maintenance in a year it also has subscription ARR: that is a prepaid leftover, not
-recurring revenue (confirmed 2026-11-13), so it is left out of every ARR figure (dashboard, CARR, customers list,
-customer page, ARR CSV, retention). It is still billed and shown separately ("Converted maint. (prepaid, not ARR)",
-`MAINTENANCE_PREPAID_CONVERTED` in the CSV). This **differs from the workbook spec 5.1**, which adds all maintenance
-(accounting's ~10.2M): 2026 excludes $274,558 from 13 converted customers. Maintenance billing, revenue, deferred and the
-GRAND TOTAL reconciliation are unchanged.
-For **future years** a signed conversion counts from signing (confirmed 2026-11-14, Belimo): the converted customer's
-maintenance of a year after the current one is not ARR as soon as the conversion is signed, even before the
-subscription starts; in the current year it stops counting once the subscription is in force.
+for **every** customer, as the workbook's spec 5.1 (accounting's ~10.2M for 2026). A customer with an active
+subscription next to perpetual maintenance is a **Hybrid** account (workbook "License Category" = Hybrid): both
+count (confirmed by accounting 2026-11-18; this replaces the 2026-11-13 rule that left a converted customer's
+maintenance out as a prepaid leftover). A conversion stops the maintenance line itself (explicit 0 from the next
+contract year), so whatever is still billed is ARR until then. The ARR CSV lists it as `MAINTENANCE`.
+
+**License Category / Hybrid class** are stored per customer (migration 0012; `customer.license_category`,
+`customer.hybrid_class`), set by the import: Hybrid when any of the customer's contract rows says so, otherwise the
+most recent row's value. Rows that disagree are a sheet error, reported by /check (X08); X06 flags a converted
+customer that still pays maintenance but is not marked Hybrid, X07 a Hybrid customer with a perpetual class and no
+maintenance billed. The customer page and the customers list show a Hybrid badge; there is no form for the fields.
 
 ## Projected Renewal (agreed 2026-11-16)
 A contract often ends before the customer signs the renewal. Rather than show that gap as churn (the workbook types the
@@ -83,8 +85,9 @@ Amended contracts are also affected, because the database splits the TCV between
 ## Conversion, add-on, termination (workflows)
 - **Conversion** (customer page) replaces the perpetual licence: it creates the CONVERSION subscription and, for each
   ticked maintenance line (ticked by default), stops maintenance (explicit 0) from the first contract year starting on
-  or after the subscription start - one change, one Undo. It has no Hybrid option: keeping the perpetual licence and
-  adding a subscription (hybrid) is a **New subscription**.
+  or after the subscription start - one change, one Undo. Keeping the perpetual licence (and its maintenance) next to
+  a subscription makes the account **Hybrid** on the workbook: record it as a **New subscription** and leave the
+  maintenance line running.
 - **Add-on** = extra modules / plants / users added to an existing subscription contract (sheet section C), usually
   co-terminus with the main contract. **New subscription** = a separate contract on a platform the customer does not
   have yet (or after a cancellation).

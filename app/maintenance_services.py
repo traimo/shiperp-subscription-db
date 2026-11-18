@@ -286,13 +286,12 @@ def convert(s: Session, actor: str, contract_id: int, on: dt.date, subscription_
 
 
 def convert_to_subscription(s: Session, actor: str, qb: int, platform: Platform, inp, line_ids: list[int],
-                            license_category: str | None = None, today: dt.date | None = None) -> Outcome:
+                            today: dt.date | None = None) -> Outcome:
     """Conversion in one step: the CONVERSION subscription plus, for each ticked maintenance line, the maintenance
     conversion (explicit 0 from the first contract year starting on/after the subscription start)."""
     from . import services
     from .models import OpenedVia, Term
-    out = services.new_subscription(s, actor, qb, platform, OpenedVia.CONVERSION, inp, license_category, None,
-                                    today=today)
+    out = services.new_subscription(s, actor, qb, platform, OpenedVia.CONVERSION, inp, today=today)
     sub_id = s.get(Term, out.entity_id).subscription_id
     for lid in line_ids:
         mc = get_contract(s, lid)

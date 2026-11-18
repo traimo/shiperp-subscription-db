@@ -2,11 +2,11 @@
 {% block title %}Dashboard{% endblock %}
 {% block content %}
 <h1>Dashboard</h1>
-<p class="sub">Computed from the database. ARR = subscription ARR + maintenance ARR of the year (the maintenance year ending in that year). A converted customer's maintenance in a year it has subscription ARR is a prepaid leftover and is not ARR (shown separately, not in Total).</p>
+<p class="sub">Computed from the database. ARR = subscription ARR + maintenance ARR of the year (the maintenance year ending in that year). Every customer's maintenance counts, including a Hybrid account's (subscription next to perpetual maintenance) - workbook spec 5.1.</p>
 {% if projected_n %}<a class="projected-note" href="/?outcome=PROJECTED#due"><span class="badge b-warning">Projected</span>
   ARR includes {{ projected_now|money }} of <b>projected renewals</b> on {{ projected_n }} contract{{ 's' if projected_n != 1 }} that ended without a renewal on file (prior ARR + uplift). These numbers will change when the renewal is signed - follow them up.</a>{% endif %}
 <div class="grid cols-4">
-  <div class="stat"><div class="n">{{ (arr_now / 1000000)|round(2) }}M</div><div class="l">ARR today ({{ today|fdate }}): subscription {{ (sub_now / 1000000)|round(2) }}M + maintenance {{ (maint_now / 1000000)|round(2) }}M{% if prepaid_now %} (excl. {{ (prepaid_now / 1000000)|round(2) }}M prepaid on converted customers){% endif %}</div></div>
+  <div class="stat"><div class="n">{{ (arr_now / 1000000)|round(2) }}M</div><div class="l">ARR today ({{ today|fdate }}): subscription {{ (sub_now / 1000000)|round(2) }}M + maintenance {{ (maint_now / 1000000)|round(2) }}M</div></div>
   <div class="stat"><div class="n">{{ (carr_now / 1000000)|round(2) }}M</div><div class="l">CARR (incl. signed, not started)</div></div>
   <div class="stat"><div class="n">{{ counts.active }}</div><div class="l">Active subscriptions · {{ counts.maintenance }} customers paying maintenance</div></div>
   <a class="stat" href="/?outcome=OPEN#due"><div class="n">{{ tally.DUE }}{% if tally.OVERDUE %} <span style="color:var(--err);font-size:16px">+ {{ tally.OVERDUE }} overdue</span>{% endif %}</div><div class="l">Renewals due in 120 days{% if tally.OVERDUE %} · overdue = ended without renewal{% endif %}</div></a>
@@ -19,10 +19,7 @@
     <table class="yeargrid">
       <tr><th></th>{% for y in years %}<th class="{{ 'new' if y == today.year }}">{{ y }}</th>{% endfor %}</tr>
       {% for name, row in arr.items() %}
-      {% if name == 'Converted maintenance' %}
-      <tr class="muted"><td title="Billed maintenance of converted customers in years they also have subscription ARR - not ARR, not in Total" style="white-space:nowrap">Prepaid (converted)</td>
-        {% for y in years %}<td class="num">{{ (row[y] / 1000000)|round(2) }}M</td>{% endfor %}</tr>
-      {% elif name == 'Signed, not started' %}
+      {% if name == 'Signed, not started' %}
       {% if row.values()|select|list %}<tr class="muted"><td title="Contracts signed but not started yet: CARR, not ARR - not in Total" style="white-space:nowrap">Signed, not started</td>
         {% for y in years %}<td class="num">{{ (row[y] / 1000000)|round(2) }}M</td>{% endfor %}</tr>{% endif %}
       {% elif name == 'Projected renewal' %}

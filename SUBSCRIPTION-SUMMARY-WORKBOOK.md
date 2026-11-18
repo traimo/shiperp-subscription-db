@@ -107,8 +107,8 @@ says whether the dashboard reads the column and how.
 | **Customer Number** | QuickBooks customer number (80xxx, see Masterlist). **The key**: the same number on rows in A/B/C (initial contracts), D (renewals) and E (terminations) is one customer; also the join to the maintenance workbook and across the On-Prem / Cloud tabs. | integers 80001–80290 | Required. Lineage, cohorts, churn, dedupe |
 | Customer Name (Contract) / Contract Name | Legal name on the contract | free text, upper case | Display only |
 | Product | `On Prem` / `Cloud` (always matches the tab) | 2 values | Not used (the tab is the source) |
-| License Category | `On Premise` / `Hybrid` (Cloud tab: `Cloud` …) | 2 values | No |
-| If Hybrid - License Class | which licences a hybrid customer holds | `Perpetual/On Prem`, `On-Premise/Cloud`, `On Prem/Cloud`, `Cloud`, typos | No |
+| License Category | `On Premise` / `Hybrid` (Cloud tab: `Cloud` …) | 2 values | Stored **per customer**: Hybrid when any of the customer's rows is Hybrid (a subscription next to perpetual maintenance - both count as ARR); rows that disagree are a sheet error (check X08) |
+| If Hybrid - License Class | which licences a hybrid customer holds | `Perpetual/On Prem`, `On-Premise/Cloud`, `On Prem/Cloud`, `Cloud`, typos | Stored per customer from the latest Hybrid row; a perpetual class marks the customer as a perpetual licence holder |
 | New/Existing | Why the row exists: `New Account` (net new), `Existing` / `Existing Account` (renewal or upsell of a subscriber), `Converted` / `Converted P-C` / `Converted P-OP&C` (perpetual → subscription), `Hybrid`, `Amendment`, `Renewal`, `Plant Location`, `HazMat`, `New Account - see cloud`, `New Account - US` | 16 spellings incl. `Exisiting`, `Coverted` | A label containing "convert" (or "coverted") marks the customer as **converted** (see §5.6) |
 | AE | Account executive initials | `AC`, `JG`, `CR` | No |
 | Sales Person | Same as AE, in the billing region | | No |
@@ -188,8 +188,8 @@ estimated.
 
 ### 5.5 Churn, GRR, NRR (cohort per customer number)
 Cohort for year Y = customers with effective ARR at the end of Y−1, keyed by Customer Number across On-Prem, Cloud and
-maintenance. Effective ARR(Y) = subscription ARR(Y) + maintenance ARR(Y), except a **converted** customer whose
-subscription has started counts only the subscription (the prepaid maintenance tail is not a downgrade).
+maintenance. Effective ARR(Y) = subscription ARR(Y) + maintenance ARR(Y) for every customer (a Hybrid account counts
+both; a conversion stops the maintenance line itself, so the year it stops shows as a downgrade of that customer).
 
 - **Churned**: effective ARR goes to 0 → logo churn. Split by type: *subscription* (started on subscription, stopped),
   *conversion* (maintenance → subscription → stopped), *maintenance* (never subscribed, maintenance stopped).
@@ -251,9 +251,12 @@ prior ARR forward as an **estimate** until the D row and the year cell exist. `R
 ### 6.4 Conversion, perpetual licence → subscription (section B)
 A customer who owned a perpetual licence (and paid maintenance in the maintenance workbook) signs a subscription. The
 row goes to **B** with `New/Existing = Converted` (variants: `Converted P-C` = perpetual → Cloud, `Converted P-OP&C` =
-perpetual → On-Prem + Cloud, `Hybrid`, or plain `Existing`). `License Category` may be `Hybrid` with `If Hybrid - License
-Class = Perpetual/On Prem` when the perpetual licence is kept alongside. The maintenance line stops (explicit 0 or blank
-in the next maintenance year). Later renewals of the converted contract go to D like any other.
+perpetual → On-Prem + Cloud, `Hybrid`, or plain `Existing`). When the perpetual licence is kept alongside and its
+maintenance keeps being billed, the account is **Hybrid**: `License Category = Hybrid` with `If Hybrid - License
+Class = Perpetual/On Prem` on every row of the customer, and both the subscription and the maintenance count as ARR
+(check X06 flags a converted customer still paying maintenance without the Hybrid category). Otherwise the
+maintenance line stops (explicit 0 or blank in the next maintenance year). Later renewals of the converted contract go
+to D like any other.
 Examples: #80008 (Cloud B 10/2025–09/2026 ARR 30,000, renewed in D at 32,700), #80096 (Cloud B 09/2024–09/2027 ARR
 30,000), #80131 (On-Prem B 55,000 "Converted P-OP&C" plus a Cloud C row 10,000 "Converted P-C", same customer on both
 tabs).

@@ -65,6 +65,10 @@ class Customer(Base):
     qb_number: Mapped[int] = mapped_column(Integer, unique=True, index=True)
     name: Mapped[str] = mapped_column(String(200))
     has_perpetual_license: Mapped[bool] = mapped_column(Boolean, default=False)
+    # workbook "License Category" (On Premise / Cloud / Hybrid) and "If Hybrid - License Class", per customer:
+    # Hybrid = an active subscription next to perpetual maintenance (both count as ARR)
+    license_category: Mapped[str | None] = mapped_column(String(40))
+    hybrid_class: Mapped[str | None] = mapped_column(String(60))
     notes: Mapped[str | None] = mapped_column(Text)
     subscriptions: Mapped[list["Subscription"]] = relationship(back_populates="customer", order_by="Subscription.id")
     maintenance_contracts: Mapped[list["MaintenanceContract"]] = relationship(
@@ -95,8 +99,6 @@ class Subscription(Base):
     customer_id: Mapped[int] = mapped_column(ForeignKey("customer.id"), index=True)
     platform: Mapped[Platform] = mapped_column(_enum(Platform))
     opened_via: Mapped[OpenedVia] = mapped_column(_enum(OpenedVia))
-    license_category: Mapped[str | None] = mapped_column(String(40))
-    hybrid_class: Mapped[str | None] = mapped_column(String(60))
     notes: Mapped[str | None] = mapped_column(Text)
     customer: Mapped[Customer] = relationship(back_populates="subscriptions")
     terms: Mapped[list["Term"]] = relationship(back_populates="subscription", order_by="Term.start_date",

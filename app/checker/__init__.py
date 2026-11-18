@@ -57,6 +57,14 @@ RULES: dict[str, tuple[str, str, str]] = {
     "X04": ("Maintenance name differs from the Masterlist", "info", "Align the customer name in both workbooks."),
     "X05": ("Converted maintenance customer has no subscription", "warning",
             "A converted customer must appear on the Subscription Summary with the same number."),
+    "X06": ("Converted customer not marked Hybrid", "warning",
+            "The customer converted (section B / 'Converted') and still pays maintenance: that is a Hybrid account. "
+            "Set License Category = Hybrid and If Hybrid - License Class on its rows, or stop the maintenance line."),
+    "X07": ("Hybrid customer without maintenance", "warning",
+            "License Category is Hybrid with a perpetual class but no maintenance is billed in the register: set the "
+            "category to On Premise / Cloud, or add the maintenance line."),
+    "X08": ("License Category differs between a customer's rows", "warning",
+            "A Hybrid customer is Hybrid on every row (both tabs): correct the rows that say On Premise / Cloud."),
     # maintenance workbook
     "M01": ("Original net is not list + discount", "warning", "Original, net of discount = before discount + discount."),
     "M02": ("Maintenance % outside 15-31 %", "info", "Check the maintenance amount against the licence value."),

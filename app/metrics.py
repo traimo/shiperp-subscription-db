@@ -223,28 +223,11 @@ def is_converted(c: Customer) -> bool:
                for s in c.subscriptions)
 
 
-def maintenance_arr(c: Customer, year: int, as_of: dt.date | None = None) -> Decimal:
-    """Maintenance that counts as ARR. A converted customer's maintenance in a year it also has subscription ARR is a
-    prepaid leftover, not recurring revenue: 0 (it is still billed - see maintenance_year_arr).
-    Years after as_of's year: a signed conversion already counts (confirmed 2026-11-14, Belimo): the maintenance of
-    a future year it covers is not ARR from signing, even before the subscription starts. In the current year it
-    stops counting once the subscription is in force (point in time)."""
-    if is_converted(c):
-        future = as_of is not None and year > as_of.year
-        if customer_year_arr(c, year, as_of=None if future else as_of, project=False) > 0:
-            return ZERO
-    return maintenance_year_arr(c, year)
-
-
-def converted_maintenance(c: Customer, year: int, as_of: dt.date | None = None) -> Decimal:
-    """The billed maintenance left out of ARR by maintenance_arr (prepaid leftover of a converted customer)."""
-    return maintenance_year_arr(c, year) - maintenance_arr(c, year, as_of)
-
-
 def effective_year_arr(c: Customer, year: int, as_of: dt.date | None = None) -> Decimal:
-    """Customer ARR (dashboard, customer page, cohort spec 5.5): subscription + maintenance, except a converted
-    customer whose subscription has started counts only the subscription (the prepaid maintenance tail is not ARR)."""
-    return customer_year_arr(c, year, as_of=as_of) + maintenance_arr(c, year, as_of)
+    """Customer ARR (dashboard, customer page, cohort spec 5.5): subscription + maintenance, for every customer.
+    A Hybrid account (subscription next to perpetual maintenance) counts both; a conversion stops the maintenance
+    line itself (explicit 0), so nothing is left out here (accounting, 2026-11-18; workbook spec 5.1)."""
+    return customer_year_arr(c, year, as_of=as_of) + maintenance_year_arr(c, year)
 
 
 def carr_year(c: Customer, year: int, on: dt.date | None = None) -> Decimal:
@@ -264,19 +247,18 @@ def year_range(session: Session) -> list[int]:
 
 def arr_by_year(customers: list[Customer], years: list[int],
                 as_of: dt.date | None = None) -> dict[str, dict[int, Decimal]]:
-    """Company ARR by year = subscription ARR (both platforms) + maintenance ARR of the year, counting only terms in
-    force on as_of; signed-but-not-started terms are CARR ("Signed, not started", "CARR" rows - not in Total).
-    Unlike the workbook's spec 5.1, a converted customer's prepaid maintenance is not ARR (shown separately)."""
+    """Company ARR by year = subscription ARR (both platforms) + maintenance of the year (every customer's, as the
+    workbook's spec 5.1), counting only terms in force on as_of; signed-but-not-started terms are CARR
+    ("Signed, not started", "CARR" rows - not in Total)."""
     out = {"On-Prem": {}, "Cloud": {}, "Subscription": {}, "Maintenance": {}, "Total": {},
-           "Projected renewal": {}, "Converted maintenance": {}, "Signed, not started": {}, "CARR": {}}
+           "Projected renewal": {}, "Signed, not started": {}, "CARR": {}}
     for y in years:
         op = sum((customer_year_arr(c, y, Platform.ON_PREM, as_of) for c in customers), ZERO)
         cl = sum((customer_year_arr(c, y, Platform.CLOUD, as_of) for c in customers), ZERO)
-        mt = maintenance_arr_total(customers, y, as_of)
+        mt = maintenance_total(customers, y)
         out["On-Prem"][y], out["Cloud"][y], out["Subscription"][y] = op, cl, op + cl
         out["Maintenance"][y], out["Total"][y] = mt, op + cl + mt
         out["Projected renewal"][y] = sum((customer_projected_year(c, y, None, as_of) for c in customers), ZERO)
-        out["Converted maintenance"][y] = sum((converted_maintenance(c, y, as_of) for c in customers), ZERO)
         carr = sum((carr_year(c, y, as_of) for c in customers), ZERO) if as_of is not None else op + cl + mt
         out["CARR"][y], out["Signed, not started"][y] = carr, cents(carr - (op + cl + mt)) or ZERO  # no -0.00
     return out
@@ -285,11 +267,6 @@ def arr_by_year(customers: list[Customer], years: list[int],
 def maintenance_total(customers: list[Customer], year: int) -> Decimal:
     """Billed maintenance of the year (ties to the workbook GRAND TOTAL)."""
     return sum((maintenance_year_arr(c, year) for c in customers), ZERO)
-
-
-def maintenance_arr_total(customers: list[Customer], year: int, as_of: dt.date | None = None) -> Decimal:
-    """Maintenance that counts as ARR (converted customers' prepaid leftover excluded)."""
-    return sum((maintenance_arr(c, year, as_of) for c in customers), ZERO)
 
 
 def arr_at(customers: list[Customer], on: dt.date) -> Decimal:
@@ -463,7 +440,7 @@ class Retention:
 
 
 def retention(customers: list[Customer], year: int, as_of: dt.date | None = None) -> Retention:
-    """Cohort on effective ARR (subscription + maintenance, conversion rule applied); terms in force on as_of."""
+    """Cohort on effective ARR (subscription + maintenance of every customer); terms in force on as_of."""
     r = Retention(year, 0, ZERO, ZERO, 0, ZERO, ZERO, ZERO)
     for c in customers:
         a, b = effective_year_arr(c, year - 1, as_of), effective_year_arr(c, year, as_of)

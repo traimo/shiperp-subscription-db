@@ -132,7 +132,7 @@ def figures(factory, today: dt.date) -> dict:
         cs = metrics.load_customers(s)
         years = [today.year, today.year + 1]
         arr = metrics.arr_by_year(cs, years, today)
-        maint_now = metrics.maintenance_arr_total(cs, today.year, today)
+        maint_now = metrics.maintenance_total(cs, today.year)
         return {"arr_now": str(cents(metrics.arr_at(cs, today) + maint_now)),
                 "carr_now": str(cents(metrics.carr_at(cs, today) + maint_now)),
                 "years": {str(y): {k: str(cents(arr[k][y])) for k in ("Subscription", "Maintenance", "Total", "CARR")}

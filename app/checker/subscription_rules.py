@@ -196,7 +196,7 @@ def _enum(tab: Tab, c: ContractRow) -> list[Issue]:
     # Hybrid class
     hc = _text(v.get("hybrid_class"))
     if hc.strip():
-        canon = _hybrid(hc)
+        canon = rules.canonical_hybrid_class(hc)
         found.append(_spelling_or_unknown("S14", tab, c, "hybrid_class", hc, canon, ", ".join(rules.HYBRID_CLASS)))
     elif hc and not hc.strip():
         found.append(issue("S14", tab, c, "hybrid_class", "Cell contains only spaces.", repr(hc), "", "info"))
@@ -220,14 +220,3 @@ def _enum(tab: Tab, c: ContractRow) -> list[Issue]:
         found.append(_spelling_or_unknown("S16", tab, c, "reseller", rsl, canon, ", ".join(rules.RESELLERS), "info"))
     return [f for f in found if f is not None]
 
-
-def _hybrid(raw: str) -> str | None:
-    s = re.sub(r"\s+", " ", raw).strip().lower()
-    for h in rules.HYBRID_CLASS:
-        if s == h.lower():
-            return h
-    s2 = s.replace("on-premise", "on prem").replace("perpetial", "perpetual").replace("on-prem", "on prem")
-    for h in rules.HYBRID_CLASS:
-        if s2 == h.lower():
-            return h
-    return None

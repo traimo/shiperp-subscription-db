@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import checker, config, main
-from app.checker import Issue, accept, maintenance_rules, subscription_rules
+from app.checker import Issue, accept, cross_rules, maintenance_rules, subscription_rules
 from app.importer import maintenance as mimp
 from app.importer.sheet.model import ContractRow, Section, Tab
 from app.models import MaintenanceBlock
@@ -96,6 +96,34 @@ def test_maintenance_rules():
     assert ("M08", "H40") in found                   # GRAND TOTAL 2026 = 5 but rows add up to 0
 
 
+def _ms(fees):
+    cols = mimp.Columns({5: 2024, 6: 2025, 7: 2026, 8: 2027}, {"customer": [1], "customer name": [2]})
+    r = mimp.SheetRow(5, MaintenanceBlock.PERPETUAL_LIVE, "A.", 1,
+                      (1, 80001, "ACME", 10000, -1000, *[fees.get(y) for y in (2024, 2025, 2026, 2027)]))
+    r.fees = dict(fees)
+    return mimp.MaintenanceSheet("x.xlsx", cols, [r], {}, {}, {}, {}, 1, 40)
+
+
+def _hybrid(tab, ms):
+    wb = type("W", (), {"tabs": {"onprem": tab}})()
+    return [(i.rule, i.cell, i.expected) for i in cross_rules.check_hybrid(wb, ms)]
+
+
+def test_hybrid_rules():
+    conv = _tab({"license_category": "On Premise", "new_existing": "Converted"})
+    conv.contracts[0].section = "B"
+    assert _hybrid(conv, _ms({2025: 1000, 2026: 1000})) == [("X06", "N10", "Hybrid")]   # still paying: Hybrid
+    assert _hybrid(conv, _ms({2025: 1000, 2026: 0})) == []                  # maintenance stopped: converted
+    assert _hybrid(conv, None) == []
+    hyb = _tab({"license_category": "Hybrid", "hybrid_class": "Perpetual/On Prem"})
+    assert _hybrid(hyb, _ms({2026: 0})) == [("X07", "N10", "On Premise / Cloud")]
+    assert _hybrid(hyb, _ms({2026: 1000})) == []
+    assert _hybrid(_tab({"license_category": "Hybrid", "hybrid_class": "On Prem/Cloud"}), _ms({})) == []
+    mixed = _tab({"license_category": "Hybrid", "hybrid_class": "Perpetual/On Prem"}, {"license_category": "On Premise"})
+    assert _hybrid(mixed, _ms({2026: 1000})) == [("X08", "N11", "Hybrid")]
+    assert _hybrid(mixed, None) == [("X08", "N11", "Hybrid")]
+
+
 def test_accept_lapses_when_value_changes(tmp_path):
     i = Issue("S07", "subscription", "Tab", "I10", 10, "msg", current="900", expected="1000")
     with pytest.raises(ValueError):
@@ -139,6 +167,9 @@ def test_real_check_is_read_only_and_finds_known_items(real_check):
     typo = [i for i in res.issues if "7/8/206" in i.message]
     assert typo and typo[0].tab == "On Prem_License ARR&CARR" and re.fullmatch(r"[A-Z]+25", typo[0].cell)
     assert any(i.rule == "X01" for i in res.issues)                 # Masterlist name mismatches
+    x06 = {i.customer for i in res.issues if i.rule == "X06"}
+    assert 80008 in x06 and 80095 not in x06                        # Neovia still pays maintenance; KTM stopped
+    assert 80172 in {i.customer for i in res.issues if i.rule == "X08"}   # FFF: Hybrid on one tab only
     assert any(i.rule == "S03" and "pending" in (i.current or "") for i in res.issues)
     for i in res.issues:
         assert i.severity in checker.SEVERITIES and i.rule in checker.RULES

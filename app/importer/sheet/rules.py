@@ -36,6 +36,24 @@ PAYMENT_TERMS = ["Annual", "Upfront", "Upfront 3 yrs", "Annual (NTT)", "Annual -
 RESELLERS = ["n/a", "NTT", "Netgo", "Mehrwerk"]
 LICENSE_CATEGORY = {"onprem": ["On Premise", "Hybrid"], "cloud": ["Cloud", "Hybrid"]}
 HYBRID_CLASS = ["n/a", "Perpetual/On Prem", "Perpetual/Cloud", "On Prem/Cloud", "Cloud"]
+
+
+def is_hybrid(value) -> bool:
+    """License Category "Hybrid": an active subscription next to perpetual maintenance (both count as ARR)."""
+    return str(value or "").strip().lower() == "hybrid"
+
+
+def canonical_hybrid_class(raw) -> str | None:
+    """The HYBRID_CLASS spelling of a sheet value (tolerates on-premise / perpetial), else None."""
+    s = re.sub(r"\s+", " ", str(raw or "")).strip().lower()
+    for h in HYBRID_CLASS:
+        if s == h.lower():
+            return h
+    s2 = s.replace("on-premise", "on prem").replace("perpetial", "perpetual").replace("on-prem", "on prem")
+    for h in HYBRID_CLASS:
+        if s2 == h.lower():
+            return h
+    return None
 CHECK_VALUES = ["Yes", "To check", "mismatched", "Missing", "not in commission", "done", "Done-Tin", "n/a"]
 BILLING_PERIODS = ["Y1", "Y2", "Y3", "Y4", "Y5", "Y1, Y2, Y3 - Upfront 3yrs", "Y1 - 50%"]
 SECTION_NEW_EXISTING = {
