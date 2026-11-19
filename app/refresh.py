@@ -16,6 +16,7 @@ import datetime as dt
 import json
 import shutil
 import tempfile
+import logging
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,8 +32,11 @@ RESULT_FILE = "latest-refresh.json"
 _LOCK = threading.Lock()
 
 
+log = logging.getLogger(__name__)
+
+
 class RefreshError(RuntimeError):
-    pass
+    restored = False        # True when the import failed after the tables were rebuilt and the backup was put back
 
 
 @dataclass
@@ -141,6 +145,19 @@ def figures(factory, today: dt.date) -> dict:
                 "terms": sum(len(sub.terms) for c in cs for sub in c.subscriptions)}
 
 
+def _restore(url: str, backup: str) -> None:
+    """Copy backup schema `backup` over the live tables (rebuilt first); no new backup is taken."""
+    from . import backups
+    from .db import make_engine
+    from .dbcopy import copy_engines
+    live, src = make_engine(url), backups.engine_for(backup, url)
+    try:
+        copy_engines(src, live)
+    finally:
+        src.dispose()
+        live.dispose()
+
+
 # ------------------------------------------------------------------------------------------------ run
 
 def run(factory, actor: str, today: dt.date, reapply: bool = False, pull_from_sharepoint: bool = True,
@@ -181,6 +198,19 @@ def run(factory, actor: str, today: dt.date, reapply: bool = False, pull_from_sh
                                 report_dir=paths.reports, force=True)
         except ColumnProblem as e:                          # raised before the database is touched
             raise RefreshError(str(e)) from None
+        except Exception as e:                              # the tables were rebuilt and emptied: put the backup back
+            log.exception("Refresh: the import failed; restoring %s", backup)
+            problem = f"{type(e).__name__}: {str(e)[:600]}"
+            try:
+                _restore(url.render_as_string(hide_password=False), backup)
+            except Exception as e2:
+                raise RefreshError(f"The import failed ({problem}) and restoring backup {backup} failed too "
+                                   f"({type(e2).__name__}: {e2}). Restore it by hand: "
+                                   f"python scripts/restore_backup.py {backup}") from None
+            err = RefreshError(f"The import failed: {problem}\nThe database was restored from backup {backup} and "
+                               "is as it was before this refresh. Fix the workbook, then refresh again.")
+            err.restored = True
+            raise err from None
         engine.dispose()
         result["columns"] = report.new_columns
         result["import"] = {"counts": report.db_counts,

@@ -35,6 +35,7 @@ RENEWAL_STATUS_FIXED = [
 PAYMENT_TERMS = ["Annual", "Upfront", "Upfront 3 yrs", "Annual (NTT)", "Annual - Quarterly"]
 RESELLERS = ["n/a", "NTT", "Netgo", "Mehrwerk"]
 LICENSE_CATEGORY = {"onprem": ["On Premise", "Hybrid"], "cloud": ["Cloud", "Hybrid"]}
+QB_RANGE = (80000, 89999)       # QuickBooks customer numbers; anything else (9999, a placeholder) is not a customer
 HYBRID_CLASS = ["n/a", "Perpetual/On Prem", "Perpetual/Cloud", "On Prem/Cloud", "Cloud"]
 
 

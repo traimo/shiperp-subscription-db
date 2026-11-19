@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from .. import config
 from ..db import Base, make_engine
 from . import report as rep
-from .columns import ColumnProblem, check_register, check_subscription
+from .columns import ColumnProblem, check_customer_numbers, check_register, check_subscription
 from .maintenance import import_maintenance, read_register
 from .mapper import ImportReport, Mapper
 from .sheet.reader import read_workbook
@@ -135,7 +135,8 @@ def run_import(source: Path | None = None, url: str | None = None, today: dt.dat
         sha = hashlib.sha256(source.read_bytes()).hexdigest()       # leave an emptied database behind
         wb = read_workbook(source)                    # read-only
         check = check_subscription(wb)                # renamed / missing / look-alike columns: refuse here,
-        if maintenance:                               # before the database is touched
+        check.errors += check_customer_numbers(wb)    # before the database is touched
+        if maintenance:
             m_check = check_register(read_register(Path(maintenance)))
             check.errors += m_check.errors
             check.new_columns += m_check.new_columns

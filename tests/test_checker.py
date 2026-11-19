@@ -64,6 +64,12 @@ def test_subscription_rules(change, rule, cell, expected):
     assert i.ref == f"'On Prem_License ARR&CARR'!{cell}"
 
 
+def test_placeholder_customer_number_is_an_error():
+    found = _rules(_tab({"customer_number": 9999}), "S21")
+    assert len(found) == 1 and found[0].cell == "B10" and found[0].severity == "error" and found[0].customer == 9999
+    assert _rules(_tab({"customer_number": 80001}), "S21") == []
+
+
 def test_arr_zero_is_info_and_cancel_date_is_error():
     assert _rules(_tab({"arr": 0, "monthly": 0}), "S06")[0].severity == "info"
     i = _rules(_tab({"renewal_status": "Cancelled 6/31/2026"}), "S12")[0]

@@ -626,7 +626,13 @@ async def refresh_submit(request: Request):
         await run_in_threadpool(refresh.run, SESSION_FACTORY, actor(), today(), reapply=reapply_changes,
                                 pull_from_sharepoint=True)
     except (refresh.RefreshError, sharepoint.SharePointError) as e:
-        return redirect("/refresh/result", error=str(e)[:1500])
+        msg = str(e) if getattr(e, "restored", False) else f"The database was not changed. {e}"
+        return redirect("/refresh/result", error=msg[:1500])
+    except Exception as e:                                     # never a bare 500: say what to check
+        logging.getLogger(__name__).exception("Refresh failed")
+        return redirect("/refresh/result", error=f"Unexpected error ({type(e).__name__}): {str(e)[:700]}. Check the "
+                        "Database page: if the counts are 0, restore the newest 'before refresh' backup "
+                        "(python scripts/restore_backup.py <backup>).")
     return redirect("/refresh/result", done=1)
 
 

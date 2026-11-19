@@ -79,6 +79,22 @@ def _modified(change) -> Workbook:
     return _read(wf, wv, path)
 
 
+def _set_first_customer_number(wf, wv, number):
+    """Overwrite the first real Customer Number on the On-Prem tab (both copies of the workbook)."""
+    for name in wf.sheetnames:
+        if reader._tab_key(name) != "onprem":
+            continue
+        hdr = _header_rows(wf[name])[0]
+        col = next(c.column for c in wv[name][hdr] if c.value and norm(c.value).startswith("customer number"))
+        for r in range(hdr + 1, wv[name].max_row + 1):
+            v = wv[name].cell(r, col).value
+            if isinstance(v, (int, float)) and 80000 <= v <= 89999:
+                wf[name].cell(r, col).value = number
+                wv[name].cell(r, col).value = number
+                return
+    raise AssertionError("no customer row found")
+
+
 def _contracts(wb: Workbook):
     return sorted((c.tab, c.section, c.values.get("customer_number"), str(c.values.get("period")),
                    str(c.values.get("customer_name")), c.values.get("arr"), c.values.get("status"))
@@ -139,6 +155,23 @@ def test_renamed_customer_number_is_refused():
     wb = _modified(lambda wf, wv: _rename(wf, wv, "customer number", "Cust #"))
     errors = check_subscription(wb).errors
     assert errors and any("'Customer Number'" in e and "renamed or deleted" in e for e in errors)
+
+
+@needs_source
+def test_refresh_refuses_a_placeholder_customer_number(env, monkeypatch):  # noqa: F811
+    """A signed deal without a QB number yet (9999 on the sheet) must not empty the database (2026-11-19)."""
+    S, eng, paths = env
+    wb = _modified(lambda wf, wv: _set_first_customer_number(wf, wv, 9999))
+    monkeypatch.setattr(cli, "read_workbook", lambda path: wb)
+    before = refresh.figures(S, TODAY)
+    with S() as s:
+        n = s.scalar(select(func.count()).select_from(Customer))
+    with pytest.raises(refresh.RefreshError, match="Customer Number 9999 is not a QuickBooks") as ei:
+        refresh.run(S, "tester", TODAY, pull_from_sharepoint=False, paths=paths)
+    assert not ei.value.restored                                   # refused before the tables were touched
+    assert refresh.figures(S, TODAY) == before
+    with S() as s:
+        assert s.scalar(select(func.count()).select_from(Customer)) == n
 
 
 @needs_source

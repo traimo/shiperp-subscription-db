@@ -174,7 +174,8 @@ same browser: it answers only to `127.0.0.1` / `localhost` (add names with `APP_
 posts from another site are refused (Origin / Referer check), `back` links only go to pages of the app, and CSV exports
 prefix text cells starting with `= + - @` with an apostrophe so Excel does not run them as formulas.
 `python -m app.importer` backs the database up (a `backup_*` schema) first and reads the workbook before anything is
-dropped (a locked or broken file, or renamed / look-alike columns, leave the database as it was).
+dropped (a locked or broken file, renamed / look-alike columns, or a Customer Number outside 80000-89999 such as a
+9999 placeholder, leave the database as it was).
 
 ## Viewing the database
 - In the app: **Database** in the top menu (`/db`) — table list with row counts and purpose, a diagram of how the
@@ -208,9 +209,12 @@ the last import, then:
 1. downloads both workbooks (read-only Microsoft Graph), checks them (name, opens as Excel) and swaps them into
    `data/source` (old copies -> `data/backups/source-<stamp>/`); nothing changes if one is bad;
 2. backs up the database into a `backup_YYYYMMDD_HHMMSS` schema and saves the change list
-   (`data/backups/audit-before-refresh-<stamp>.json`); the column check (renamed / look-alike columns) refuses here,
-   before any table is touched;
-3. re-imports (every table, including the audit log, is rebuilt from the workbooks; contract links are kept);
+   (`data/backups/audit-before-refresh-<stamp>.json`); the column check (renamed / look-alike columns) and the
+   Customer Number check (every contract row needs a QB number 80000-89999; a placeholder such as 9999 for a deal
+   without a number yet is refused, check rule S21) refuse here, before any table is touched;
+3. re-imports (every table, including the audit log, is rebuilt from the workbooks; contract links are kept). If
+   the import fails after the tables were rebuilt, the backup from step 2 is put back automatically and the result
+   page says so (2026-11-19: a 9999 row left the database empty before this guard existed);
 4. **Reapply?** - default **Do not reapply**: the database then matches the workbooks exactly. "Reapply" replays the
    changes through the normal operations (`app/reapply.py`), matching rows by customer number + sheet ref (or, for
    terms created in the app, platform + kind + dates + TCV): new customer / subscription, add-on, renewal, amendment,

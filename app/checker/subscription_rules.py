@@ -68,6 +68,10 @@ def check(wb: Workbook) -> list[Issue]:
         for (row, why) in tab.skipped_rows:
             out.append(Issue("S02", WB, tab.sheet_name, f"A{row}", row, why + " - the row is not imported."))
         for c in tab.contracts:
+            if not rules.QB_RANGE[0] <= c.customer_number <= rules.QB_RANGE[1]:
+                out.append(issue("S21", tab, c, "customer_number", f"Customer Number {c.customer_number} is not a "
+                                 "QuickBooks number - the refresh refuses the workbook until it has one.",
+                                 c.customer_number, f"{rules.QB_RANGE[0]}-{rules.QB_RANGE[1]}", "error"))
             out += _row_checks(tab, c)
     return out
 

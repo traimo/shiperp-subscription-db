@@ -50,6 +50,8 @@ RULES: dict[str, tuple[str, str, str]] = {
     "S18": ("Checklist item open", "warning", "Resolve the control check (To check / mismatched / Missing)."),
     "S19": ("Counter - per Year is not 1", "warning", "Each contract row counts 1."),
     "S20": ("Monthly revenue does not add up to YTD", "warning", "Σ monthly GAAP revenue of the year = YTD column."),
+    "S21": ("Customer Number is not a QuickBooks number", "error",
+            "Enter the customer's QB number (80000-89999). A placeholder such as 9999 blocks the whole refresh."),
     # cross-workbook / masterlist
     "X01": ("Masterlist name differs from the contracts", "warning", "Correct the name on the Masterlist tab."),
     "X02": ("Customer number missing from the Masterlist", "warning", "Add the customer to the Masterlist tab."),

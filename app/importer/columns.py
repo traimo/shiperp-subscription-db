@@ -47,8 +47,18 @@ class ColumnCheck:
 
     def raise_if_errors(self) -> None:
         if self.errors:
-            raise ColumnProblem("The spreadsheet's columns changed in a way the import cannot handle safely - "
-                                "nothing was imported:\n- " + "\n- ".join(self.errors))
+            raise ColumnProblem("The spreadsheet cannot be imported safely - nothing was imported:\n- "
+                                + "\n- ".join(self.errors))
+
+
+def check_customer_numbers(wb) -> list[str]:
+    """Contract rows whose Customer Number is not a QuickBooks number (80000-89999): a placeholder such as 9999 for a
+    deal without a number yet. The database refuses them, so the import refuses the workbook before touching it."""
+    from .sheet.rules import QB_RANGE
+    lo, hi = QB_RANGE
+    return [f"{tab.sheet_name} row {c.row}: Customer Number {c.customer_number} is not a QuickBooks customer "
+            f"number ({lo}-{hi}). Enter the customer's QB number, or leave the row out until it has one."
+            for tab in wb.tabs.values() for c in tab.contracts if not lo <= c.customer_number <= hi]
 
 
 def _letters(cols) -> str:

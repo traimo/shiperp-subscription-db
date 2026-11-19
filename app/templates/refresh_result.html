@@ -3,7 +3,7 @@
 {% block content %}
 <h1>Refresh data</h1>
 {% if msg %}<div class="alert ok">{{ msg }}</div>{% endif %}
-{% if error %}<div class="alert err" style="white-space:pre-line">Refresh failed - the database was not changed. {{ error }}</div>{% endif %}
+{% if error %}<div class="alert err" style="white-space:pre-line">Refresh failed. {{ error }}</div>{% endif %}
 {% if not r %}<p class="muted">No refresh has run yet. Use <b>Refresh data</b> in the header.</p>
 {% else %}
 <p class="sub">{{ 'Refreshed' if done else 'Last refresh' }} {{ r.started.replace('T', ' ') }} by {{ r.actor }} ·

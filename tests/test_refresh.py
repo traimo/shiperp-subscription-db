@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
+from urllib.parse import unquote_plus
 from sqlalchemy.orm import sessionmaker
 
 from app import backups, config, document_services as docs, main, reapply as rp, refresh, services, sharepoint, undo
@@ -238,6 +239,46 @@ def test_dialog_defaults_to_do_not_reapply(env, monkeypatch):
     assert "Refresh needs SharePoint" in html and "not set up" in html               # SharePoint only
     assert '<button type="submit" class="btn primary" disabled>' in html
     assert 'type="file"' not in html and 'name="source"' not in html
+
+
+@needs_source
+def test_failed_import_restores_the_backup(env, monkeypatch):
+    """An error after the tables were rebuilt (2026-11-19: a check constraint) must not leave the database empty."""
+    S, eng, paths = env
+    from app.importer import cli
+
+    class Boom:
+        def __init__(self, *a, **k):
+            pass
+
+        def run(self):
+            raise RuntimeError("boom at row 7")
+
+    monkeypatch.setattr(cli, "Mapper", Boom)
+    before = refresh.figures(S, TODAY)
+    with S() as s:
+        n = s.scalar(select(func.count()).select_from(Customer))
+    with pytest.raises(refresh.RefreshError, match="restored from backup backup_") as ei:
+        refresh.run(S, "tester", TODAY, pull_from_sharepoint=False, paths=paths)
+    assert ei.value.restored and "boom at row 7" in str(ei.value)
+    assert refresh.figures(S, TODAY) == before
+    with S() as s:
+        assert s.scalar(select(func.count()).select_from(Customer)) == n
+
+
+@needs_source
+def test_refresh_errors_never_give_a_bare_500(env, monkeypatch):
+    S, eng, paths = env
+    client = TestClient(main.app)
+    monkeypatch.setattr(refresh, "run", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    res = client.post("/refresh", data={"reapply": "no"}, follow_redirects=False)
+    assert res.status_code == 303
+    err = unquote_plus(res.headers["location"])
+    assert "Unexpected error (RuntimeError): boom" in err and "restore_backup" in err
+    assert "Refresh failed. Unexpected error" in client.get(res.headers["location"]).text
+    monkeypatch.setattr(refresh, "run", lambda *a, **k: (_ for _ in ()).throw(refresh.RefreshError("no file")))
+    res = client.post("/refresh", data={"reapply": "no"}, follow_redirects=False)
+    assert "The database was not changed. no file" in unquote_plus(res.headers["location"])
 
 
 @needs_source
